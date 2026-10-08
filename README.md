@@ -18,6 +18,7 @@ A Go-based API middleware service built with [Gin Web Framework](https://github.
   - [4. Run Locally (Go Development)](#4-run-locally-go-development)
 - [API Endpoints & Testing](#api-endpoints--testing)
 - [Database Migrations](#database-migrations)
+- [Database Seeder (Mock Data)](#database-seeder-mock-data)
 - [Testing (TDD)](#testing-tdd)
 - [Environment Variables](#environment-variables)
 - [Troubleshooting](#troubleshooting)
@@ -71,16 +72,24 @@ When running with Docker Compose, three services are orchestrated in the `hospit
 ```text
 hospital-middleware/
 ├── cmd/
-│   └── api/
-│       ├── main.go               # Application entrypoint & dependency injection
-│       └── main_test.go          # API route integration tests
+│   ├── api/
+│   │   ├── main.go               # Application entrypoint & dependency injection
+│   │   └── main_test.go          # API route integration tests
+│   └── seed/
+│       └── main.go               # Standalone database seeder CLI
 ├── internal/
 │   ├── config/
 │   │   ├── config.go             # Configuration & environment variable loader
 │   │   └── config_test.go        # Config unit tests
 │   ├── database/
+│   │   ├── migrate.go            # Embedded migration executor (golang-migrate)
+│   │   ├── migrate_test.go       # Migration runner unit tests
 │   │   ├── postgres.go           # PostgreSQL connection pool & management
-│   │   └── postgres_test.go      # Database connection TDD suite
+│   │   ├── postgres_test.go      # Database connection TDD suite
+│   │   └── seeds/                # Mockup datasets & database seeder logic
+│   │       ├── hospital.go       # Hospital mock data & transaction seeder
+│   │       ├── hospital_test.go  # Seed data unit tests
+│   │       └── seeder.go         # Seeder coordinator
 │   ├── handlers/
 │   │   ├── health_handler.go     # Health & probe HTTP handlers
 │   │   ├── health_handler_test.go# Handler unit tests (mocked DB)
@@ -302,6 +311,42 @@ migrate -path migrations -database "postgres://admin:postgres@localhost:5432/hos
 #### Check current version:
 ```bash
 migrate -path migrations -database "postgres://admin:postgres@localhost:5432/hospital_middleware_db?sslmode=disable" version
+```
+
+---
+
+## Database Seeder (Mock Data)
+
+A dedicated Go Seeder CLI is provided under [`cmd/seed/`](cmd/seed/) to inject realistic mockup data into the database for local development and testing, keeping the `migrations/` directory clean and free of test-data pollution.
+
+### Features
+- **Production Safeguard:** Automatically prevents execution if `GIN_MODE=release` or `APP_ENV=production`, unless overridden with the `-force` flag.
+- **Idempotency:** Utilizes `ON CONFLICT (hn) DO UPDATE` so seeders can be re-run safely without primary or unique key violations.
+- **Single Transaction:** All inserts for each table run atomically inside a database transaction (`BeginTx`).
+
+### Usage
+
+Ensure the PostgreSQL database container or instance is running (`docker compose up -d postgres`), then run:
+
+#### 1. Seed All Tables (Default):
+```bash
+go run ./cmd/seed
+```
+
+#### 2. Seed Specific Table:
+```bash
+# Seed only the hospital table
+go run ./cmd/seed -table=hospital
+```
+
+#### 3. Seed in Production (Bypass Safeguard):
+```bash
+go run ./cmd/seed -table=hospital -force
+```
+
+#### 4. View Available CLI Flags:
+```bash
+go run ./cmd/seed -help
 ```
 
 ---
