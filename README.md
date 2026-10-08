@@ -17,7 +17,14 @@ A Go-based API middleware service built with [Gin Web Framework](https://github.
   - [3. Run with Docker Compose](#3-run-with-docker-compose)
   - [4. Run Locally (Go Development)](#4-run-locally-go-development)
 - [API Endpoints & Testing](#api-endpoints--testing)
+  - [Endpoints](#endpoints)
+  - [Request Validation Rules](#request-validation-rules)
+  - [Testing via curl](#testing-via-curl)
+  - [Error Handling (RFC 7807 Problem Details)](#error-handling-rfc-7807-problem-details)
 - [Database Migrations](#database-migrations)
+  - [1. Automatic Migrations on Startup](#1-automatic-migrations-on-startup)
+  - [2. Migration Files Overview](#2-migration-files-overview)
+  - [3. Manual CLI Migrations](#3-manual-cli-migrations)
 - [Database Seeder (Mock Data)](#database-seeder-mock-data)
 - [Testing (TDD)](#testing-tdd)
 - [Environment Variables](#environment-variables)
@@ -27,18 +34,24 @@ A Go-based API middleware service built with [Gin Web Framework](https://github.
 
 ## Features
 
-- **Gin HTTP Server**: Fast and lightweight REST API framework in Go.
-- **Nginx Reverse Proxy**: Production-ready gateway with HTTP-to-HTTPS automatic redirect, HTTP/2, keepalive, and WebSocket support.
-- **SSL/TLS (HTTPS)**: Preconfigured Nginx reverse proxy with SAN-enabled SSL certificates supporting `localhost` and `127.0.0.1`.
-- **PostgreSQL 18**: Database layer with connection pooling, health probes, and automatic schema migrations.
-- **Dockerized**: Multi-stage minimal non-root Alpine container with automated healthcheck orchestration.
-- **Database Migrations**: Embedded migrations using `golang-migrate` and Go `embed.FS`.
+- **Gin HTTP Server**: Fast and lightweight REST API framework with graceful shutdown (SIGINT/SIGTERM trapping) and HTTP server timeout protection (`ReadTimeout`, `WriteTimeout`, `IdleTimeout`).
+- **Nginx Reverse Proxy & HTTP/2**: Production-ready reverse proxy with HTTP-to-HTTPS redirection via `308 Permanent Redirect` (preserving HTTP request method and payload), upstream keepalive connection pooling, and HTTP/2 protocol support.
+- **SSL/TLS (HTTPS)**: Preconfigured Nginx reverse proxy with SAN-enabled SSL certificates supporting `localhost`, IPv4 `127.0.0.1`, and IPv6 `::1`.
+- **Security Hardening**: Nginx version banner hidden (`server_tokens off`), strict HTTP security headers (`X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`), and strict SSL file permissions (`600` for private key, `644` for certificate).
+- **PostgreSQL 18 Integration**: Database layer with connection pooling (`DB_MAX_OPEN_CONNS`, `DB_MAX_IDLE_CONNS`, lifetime & idle time tuning), health check probes, and automated schema migrations.
+- **JWT Authentication & Session Persistence**: Secure session management using HMAC-SHA256 (`HS256`) JWT tokens stored in the `staff_session` database table and dispatched to clients via `HttpOnly`, `SameSite=Lax`, and `Secure` cookies.
+- **Strict Password & Identity Policy**: Alphanumeric username validation, comprehensive password policy (8–32 chars, ASCII English only, lowercase, uppercase, digit, and special symbol), and password hashing via `bcrypt`.
+- **RFC 7807 Problem Details**: Centralized error handling returning standardized `application/problem+json` error responses with distinct error URIs and descriptive titles.
+- **Dynamic CORS Middleware**: Origin whitelist filtering (`CORS_ALLOWED_ORIGINS`), credential forwarding (`Access-Control-Allow-Credentials: true`), and preflight caching (`CORS_MAX_AGE_SECONDS`).
+- **Dockerized**: Multi-stage minimal non-root Alpine container with automated healthcheck orchestration on `bridge-network`.
+- **Database Migrations**: Embedded migrations (000001 through 000004) using `golang-migrate` and Go `embed.FS`.
+- **Database Seeder**: Standalone CLI tool (`cmd/seed`) with environment safety guards and idempotent single-transaction seeding.
 
 ---
 
 ## Architecture & Services
 
-When running with Docker Compose, three services are orchestrated in the `hospital-network` bridge network:
+When running with Docker Compose, three services are orchestrated in the `bridge-network` bridge network:
 
 ```
 [Client / Browser / curl]
@@ -48,7 +61,7 @@ When running with Docker Compose, three services are orchestrated in the `hospit
 ┌─────────────────────────────────┐       ┌─────────────────────────────────┐
 │              Nginx              │       │          Go API Service         │
 │              (nginx)            │──────>│     (hospital-middleware-api)   │
-│  - Port 80 (HTTP -> 301 HTTPS)  │       │  - Port 8080                    │
+│  - Port 80 (HTTP -> 308 HTTPS)  │       │  - Port 8080                    │
 │  - Port 443 (HTTPS / SSL)       │       └────────────────┬────────────────┘
 └─────────────────────────────────┘                        │ (Port 5432)
                                                            ▼
@@ -61,7 +74,7 @@ When running with Docker Compose, three services are orchestrated in the `hospit
 
 | Service | Container Name | Internal Port | Exposed Host Port | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| **`nginx`** | `nginx` | `80`, `443` | `80`, `443` | Reverse proxy & SSL termination |
+| **`nginx`** | `nginx` | `80`, `443` | `80`, `443` | Reverse proxy, SSL termination, and HTTP 308 redirect |
 | **`hospital-middleware-api`** | `hospital-middleware-api` | `8080` | `8080` | Go Gin REST API application |
 | **`postgres`** | `postgres` | `5432` | `5432` | PostgreSQL 18.4 database |
 
@@ -73,46 +86,77 @@ When running with Docker Compose, three services are orchestrated in the `hospit
 hospital-middleware/
 ├── cmd/
 │   ├── api/
-│   │   ├── main.go               # Application entrypoint & dependency injection
-│   │   └── main_test.go          # API route integration tests
+│   │   ├── main.go                       # Application entrypoint, DI, server timeouts & graceful shutdown
+│   │   └── main_test.go                  # API route integration tests (mocked & live DB)
 │   └── seed/
-│       └── main.go               # Standalone database seeder CLI
+│       └── main.go                       # Standalone database seeder CLI
 ├── internal/
+│   ├── auth/                             # Authentication & JWT token service (HS256)
+│   │   ├── jwt.go                        # Token generator & claims validator
+│   │   └── jwt_test.go                   # JWT unit tests
 │   ├── config/
-│   │   ├── config.go             # Configuration & environment variable loader
-│   │   └── config_test.go        # Config unit tests
+│   │   ├── config.go                     # Configuration loader, environment validator, and DSN builder
+│   │   └── config_test.go                # Config unit tests
 │   ├── database/
-│   │   ├── migrate.go            # Embedded migration executor (golang-migrate)
-│   │   ├── migrate_test.go       # Migration runner unit tests
-│   │   ├── postgres.go           # PostgreSQL connection pool & management
-│   │   ├── postgres_test.go      # Database connection TDD suite
-│   │   └── seeds/                # Mockup datasets & database seeder logic
-│   │       ├── hospital.go       # Hospital mock data & transaction seeder
-│   │       ├── hospital_test.go  # Seed data unit tests
-│   │       └── seeder.go         # Seeder coordinator
+│   │   ├── migrate.go                    # Embedded migration executor (golang-migrate)
+│   │   ├── migrate_test.go               # Migration runner unit tests
+│   │   ├── postgres.go                   # PostgreSQL connection pool & management
+│   │   ├── postgres_test.go              # Database connection TDD suite
+│   │   └── seeds/                        # Mockup datasets & database seeder logic
+│   │       ├── hospital.go               # Hospital mock data & transaction seeder
+│   │       ├── hospital_test.go          # Seed data unit tests
+│   │       └── seeder.go                 # Seeder coordinator
 │   ├── handlers/
-│   │   ├── health_handler.go     # Health & probe HTTP handlers
-│   │   ├── health_handler_test.go# Handler unit tests (mocked DB)
-│   │   └── routes.go             # Route registration & grouping
+│   │   ├── health_handler.go             # Health & readiness probe HTTP handlers
+│   │   ├── health_handler_test.go        # Health handler unit tests (mocked DB)
+│   │   ├── staff_handler.go              # Staff HTTP handler (/staff/create) & password validator
+│   │   ├── staff_handler_test.go         # Staff handler unit tests
+│   │   └── routes.go                     # Route registration & global middleware attachment
 │   ├── middleware/
-│   │   ├── cors.go               # CORS middleware
-│   │   └── cors_test.go          # Middleware unit tests
-│   ├── models/                   # Domain entities and data structures
-│   └── repository/               # Database access & query layer
-├── migrations/                   # SQL migration scripts (.up.sql & .down.sql)
-├── nginx/                        # Nginx reverse proxy configuration
-│   ├── default.conf              # Reverse proxy, upstream, HTTP/HTTPS rules
-│   └── ssl/                      # SSL certificate directory (Git-ignored)
-│       ├── .gitkeep              # Tracks directory structure in Git
-│       ├── generate-cert.sh      # Script to generate local SSL certificates
-│       ├── server.crt            # Public SSL certificate (generated)
-│       └── server.key            # Private SSL key (generated)
-├── Dockerfile                    # Multi-stage Docker build
-├── docker-compose.yml            # Docker Compose service definition
-├── .dockerignore                 # Excluded build context files
-├── .env.example                  # Template for environment variables
-├── go.mod                        # Go module definitions
-├── go.sum                        # Dependency checksums
+│   │   ├── cors.go                       # Dynamic CORS middleware (origin whitelist, credentials, max-age)
+│   │   ├── cors_test.go                  # CORS unit tests
+│   │   ├── error_handler.go              # Centralized RFC 7807 Problem Details error handler
+│   │   └── error_handler_test.go         # Error handler unit tests
+│   ├── models/                           # Domain entities and data structures
+│   │   ├── hospital.go                   # Hospital domain entity
+│   │   ├── staff.go                      # Staff domain entity
+│   │   └── staff_session.go              # Staff session domain entity
+│   ├── repository/                       # Database access & query layer (Data persistence)
+│   │   ├── hospital_repository.go        # Hospital data access implementation
+│   │   ├── hospital_repository_test.go   # Hospital repository unit & integration tests
+│   │   ├── staff_repository.go           # Staff data access implementation
+│   │   ├── staff_repository_test.go      # Staff repository unit & integration tests
+│   │   ├── staff_session_repository.go   # Staff session data access implementation
+│   │   └── staff_session_repository_test.go # Staff session repository unit & integration tests
+│   ├── response/                         # Reusable JSend / Custom Envelope response package
+│   │   ├── response.go                   # Generic response envelope & helpers
+│   │   └── response_test.go              # Response envelope unit tests
+│   └── service/                          # Business logic layer (Domain rules)
+│       ├── staff_service.go              # Staff business logic (bcrypt, JWT issuance, session persistence)
+│       └── staff_service_test.go         # Staff service unit tests
+├── migrations/                           # SQL migration scripts (.up.sql & .down.sql)
+│   ├── 000001_create_hospital_table.up.sql
+│   ├── 000001_create_hospital_table.down.sql
+│   ├── 000002_create_staff_table.up.sql
+│   ├── 000002_create_staff_table.down.sql
+│   ├── 000003_create_patient_table.up.sql
+│   ├── 000003_create_patient_table.down.sql
+│   ├── 000004_create_staff_session_table.up.sql
+│   ├── 000004_create_staff_session_table.down.sql
+│   └── migrations.go                     # Go embed.FS binding for migrations
+├── nginx/                                # Nginx reverse proxy configuration
+│   ├── default.conf                      # Reverse proxy, upstream keepalive, HTTP 308, security headers
+│   └── ssl/                              # SSL certificate directory (Git-ignored)
+│       ├── .gitkeep                      # Tracks directory structure in Git
+│       ├── generate-cert.sh              # Script to generate local SSL certificates (SAN: IPv4 & IPv6)
+│       ├── server.crt                    # Public SSL certificate (generated)
+│       └── server.key                    # Private SSL key (generated)
+├── Dockerfile                            # Multi-stage Docker build
+├── docker-compose.yml                    # Docker Compose service definition
+├── .dockerignore                         # Excluded build context files
+├── .env.example                          # Template for environment variables
+├── go.mod                                # Go module definitions
+├── go.sum                                # Dependency checksums
 └── README.md
 ```
 
@@ -123,7 +167,7 @@ hospital-middleware/
 - **Docker**: `20.10+` (or Docker Desktop)
 - **Docker Compose**: `v2+`
 - **Go**: `1.25.0` or higher *(only if developing/running outside Docker)*
-- **OpenSSL**: *(used to generate local SSL certificates)*
+- **OpenSSL**: *(used to generate local SSL certificates; Docker fallback is automatic)*
 - **golang-migrate**: *(optional, for running CLI migrations manually)*
 
 ---
@@ -146,14 +190,13 @@ chmod +x ./nginx/ssl/generate-cert.sh
 # 4. Start all services
 docker compose up -d --build
 
-# 5. Verify health
+# 5. Verify health via HTTPS
 curl -k https://localhost/health
 # Expected: {"database":"connected","status":"healthy"}
 ```
 
 > **Note for Windows users:**
 > - Run `./nginx/ssl/generate-cert.sh` inside **Git Bash** or **WSL**.
-
 
 ---
 
@@ -170,14 +213,20 @@ Review `.env` settings if needed (default values work out of the box for local d
 
 ### 2. Generate SSL Certificates
 
-Because private keys (`*.key`) and certificates (`*.crt`) are excluded from Git for security, each developer must generate them once locally:
+Because private keys (`*.key`) and certificates (`*.crt`) are excluded from Git for security, generate them once locally:
 
 ```bash
 chmod +x ./nginx/ssl/generate-cert.sh
 ./nginx/ssl/generate-cert.sh
 ```
 
-This generates `server.crt` and `server.key` inside `nginx/ssl/` with Subject Alternative Names (SAN) supporting `localhost` and `127.0.0.1`. *(If OpenSSL is not installed on the host, the script will automatically fallback to using Docker).*
+Optional arguments:
+```bash
+# Custom domain and validity period (days)
+./nginx/ssl/generate-cert.sh localhost 365
+```
+
+This generates `server.crt` and `server.key` inside `nginx/ssl/` with Subject Alternative Names (SAN) supporting `localhost`, `127.0.0.1`, and `::1`. *(If OpenSSL is not installed on the host, the script automatically falls back to Docker and ensures file permissions are set correctly to `600` for the key and `644` for the certificate).*
 
 ### 3. Run with Docker Compose
 
@@ -240,32 +289,156 @@ If developing Go code locally without running the API container:
 
 ### Endpoints
 
-| Method | Endpoint | Description | Response Example |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/health` | Readiness probe & PostgreSQL DB check | `{"database":"connected","status":"healthy"}` |
-| `GET` | `/api/v1/health`| API v1 scoped database check | `{"database":"connected","status":"healthy"}` |
+| Method | Endpoint | Description | Status Code | Content-Type |
+| :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/health` | Readiness probe & PostgreSQL DB check | `200 OK` | `application/json` |
+| `POST` | `/staff/create` | Validate hospital HN, create staff member, hash password, persist session & issue JWT | `201 Created` | `application/json` |
+
+---
+
+### Request Validation Rules
+
+#### `POST /staff/create` Request Payload
+```json
+{
+  "username": "somchai",
+  "password": "Password123!",
+  "hospital": "HOSP001"
+}
+```
+
+- **`username`** *(required, string)*:
+  - Must be strictly alphanumeric (`[a-zA-Z0-9]`).
+  - Thai characters, spaces, and punctuation/special characters are rejected.
+- **`password`** *(required, string)*:
+  - Length: between 8 and 32 characters.
+  - Allowed characters: English letters, numbers, and allowed ASCII symbols (`!@#$%^&*()-_=+[]{}|;:'",.<>/?`~\\`).
+  - Character requirements:
+    - At least 1 lowercase letter (`a-z`)
+    - At least 1 uppercase letter (`A-Z`)
+    - At least 1 digit (`0-9`)
+    - At least 1 special character
+  - Rejects Thai characters, emojis, and non-ASCII characters.
+- **`hospital`** *(required, string)*:
+  - Must match an existing hospital HN in the database (e.g. `HOSP001`).
+
+---
 
 ### Testing via curl
 
 #### 1. Via HTTPS (Port 443 - Recommended)
 > *Note: Use `-k` (or `--insecure`) because the SSL certificate is self-signed.*
+
 ```bash
 # Health & Database connection test
 curl -k https://localhost/health
+
+# Create Staff Member (JSend / Custom Envelope response & HttpOnly cookie)
+curl -k -i -X POST https://localhost/staff/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "somchai",
+    "password": "Password123!",
+    "hospital": "HOSP001"
+  }'
 ```
 
-#### 2. Via HTTP Auto-Redirect (Port 80 -> 443)
+**HTTP 201 Created Response:**
+- Header: `Set-Cookie: session_token=<jwt_token>; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax; [Secure]`
+- Response Body:
+```json
+{
+  "status": "success",
+  "message": "staff created successfully",
+  "data": {
+    "staff": {
+      "id": "76ec965b-bf50-48b4-82a4-7935f8c6ebf7",
+      "username": "somchai",
+      "hospital_hn": "HOSP001",
+      "hospital_name": "Bangkok General Hospital",
+      "created_at": "2026-10-08T17:34:38.123456Z"
+    },
+    "session": {
+      "expires_at": "2026-10-09T17:34:38.123456Z"
+    }
+  }
+}
+```
+
+#### 2. Via HTTP Auto-Redirect (Port 80 -> 443 via 308)
+Nginx issues an **HTTP 308 Permanent Redirect**, which guarantees that clients preserve the HTTP method (`POST`) and request body when redirecting to HTTPS:
 ```bash
-# Inspect 301 Redirect response
+# Inspect 308 Permanent Redirect response
 curl -i http://localhost/health
 
-# Follow redirect automatically (-L)
-curl -k -L http://localhost/health
+# Automatically follow redirect (-L) for POST request
+curl -k -L -i -X POST http://localhost/staff/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "nurse_ann",
+    "password": "Password123!",
+    "hospital": "HOSP001"
+  }'
 ```
 
 #### 3. Direct to API Service (Port 8080 - Debugging)
 ```bash
+# Health probe
 curl http://localhost:8080/health
+
+# Create Staff Member
+curl -i -X POST http://localhost:8080/staff/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "somchai",
+    "password": "Password123!",
+    "hospital": "HOSP001"
+  }'
+```
+
+---
+
+### Error Handling (RFC 7807 Problem Details)
+
+All API errors conform to the RFC 7807 specification with Content-Type `application/problem+json`:
+
+#### 1. Hospital Not Found (`400 Bad Request`)
+Returned when the requested hospital HN does not exist in the database:
+```json
+{
+  "type": "/errors/hospital-not-found",
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "hospital not found",
+  "instance": "/staff/create",
+  "error": "hospital not found"
+}
+```
+
+#### 2. Staff Already Exists (`409 Conflict`)
+Returned when the staff username is already registered for this hospital:
+```json
+{
+  "type": "/errors/staff-already-exists",
+  "title": "Conflict",
+  "status": 409,
+  "detail": "staff already exists",
+  "instance": "/staff/create",
+  "error": "staff already exists"
+}
+```
+
+#### 3. Request Validation Failure (`400 Bad Request`)
+Returned when username format or password security policy rules fail:
+```json
+{
+  "type": "/errors/validation-error",
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "Key: 'CreateStaffRequest.Password' Error:Field validation for 'Password' failed on the 'password' tag",
+  "instance": "/staff/create",
+  "error": "Key: 'CreateStaffRequest.Password' Error:Field validation for 'Password' failed on the 'password' tag"
+}
 ```
 
 ---
@@ -282,7 +455,16 @@ To disable auto-migrations in production or CI/CD pipelines, set:
 DB_AUTO_MIGRATE=false
 ```
 
-### 2. Manual CLI Migrations
+### 2. Migration Files Overview
+
+| Version | Migration Name | Description |
+| :--- | :--- | :--- |
+| `000001` | `create_hospital_table` | Hospital entity table (`id`, `hn`, `name`, timestamps) |
+| `000002` | `create_staff_table` | Staff entity table with hospital foreign key & unique `(hospital_id, username)` |
+| `000003` | `create_patient_table` | Patient entity table |
+| `000004` | `create_staff_session_table` | Staff authentication session table (`staff_id`, `token`, `expires_at`) with foreign key cascade & indices |
+
+### 3. Manual CLI Migrations
 
 Install the `migrate` CLI tool:
 ```bash
@@ -292,10 +474,6 @@ go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@lat
 #### Create a new migration:
 ```bash
 migrate create -ext sql -dir migrations -seq <migration_name>
-```
-*Example:*
-```bash
-migrate create -ext sql -dir migrations -seq create_staff_table
 ```
 
 #### Apply pending migrations (Up):
@@ -359,6 +537,8 @@ Run the full Go test suite (unit tests and database integration tests):
 go test -v ./...
 ```
 
+> **Tip:** If running outside standard system paths, ensure the Go binary directory is in your `PATH` (e.g., `export PATH=$PATH:/usr/local/go/bin:~/go/bin`).
+
 ---
 
 ## Environment Variables
@@ -366,8 +546,8 @@ go test -v ./...
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `PORT` | `8080` | Port for the Go HTTP server |
-| `GIN_MODE` | `debug` | Gin framework mode (`debug` or `release`) |
-| `NGINX_PORT` | `80` | Host port for Nginx HTTP (redirects to HTTPS) |
+| `GIN_MODE` | `debug` | Gin framework mode (`debug` or `release`; set to `release` in Docker Compose) |
+| `NGINX_PORT` | `80` | Host port for Nginx HTTP (redirects to HTTPS via 308) |
 | `NGINX_SSL_PORT` | `443` | Host port for Nginx HTTPS (SSL/TLS) |
 | `DB_HOST` | `localhost` | PostgreSQL host (`postgres` when inside Docker) |
 | `DB_PORT` | `5432` | PostgreSQL port |
@@ -376,6 +556,14 @@ go test -v ./...
 | `DB_NAME` | `hospital_middleware_db` | PostgreSQL database name |
 | `DB_SSLMODE` | `disable` | PostgreSQL SSL mode (`disable`, `require`, etc.) |
 | `DB_AUTO_MIGRATE` | `true` | Automatically run migrations on startup (`true` / `false`) |
+| `DB_MAX_OPEN_CONNS` | `25` | Maximum number of open connections in PostgreSQL connection pool |
+| `DB_MAX_IDLE_CONNS` | `25` | Maximum number of idle connections in PostgreSQL connection pool |
+| `DB_CONN_MAX_LIFETIME_MINUTES` | `5` | Connection maximum lifetime in minutes before recycling |
+| `DB_CONN_MAX_IDLE_TIME_MINUTES` | `5` | Maximum idle connection duration in minutes |
+| `JWT_SECRET` | `hospital-middleware-super-secret-key-32bytes` | Secret key used for signing and validating JWT session tokens (minimum 32 characters) |
+| `JWT_EXPIRY_SECONDS` | `86400` | Expiration time for JWT session tokens in seconds (default: 24h) |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Comma-separated list of allowed origins for CORS (supports `*` for all) |
+| `CORS_MAX_AGE_SECONDS` | `86400` | Browser cache duration for CORS preflight OPTIONS in seconds (default: 24h) |
 
 ---
 
@@ -388,12 +576,24 @@ SSL certificate files are git-ignored for security. Generate them by running:
 docker compose up -d --force-recreate nginx
 ```
 
-### 2. SSL certificate warning in browser or curl (`certificate verify failed`)
+### 2. Startup fatal error: `jwt secret must be at least 32 characters long`
+For cryptographic security, `JWT_SECRET` is validated on startup and requires at least 32 characters. Ensure your `.env` contains a sufficiently long secret key:
+```env
+JWT_SECRET=your_jwt_secret_key_at_least_32_characters_long
+```
+
+### 3. SSL certificate warning in browser or curl (`certificate verify failed`)
 Because the certificate is self-signed for local development:
 - **curl**: Pass the `-k` (or `--insecure`) flag.
 - **Chrome / Firefox**: Click "Advanced" -> "Proceed to localhost (unsafe)".
 
-### 3. Dependency version conflicts (`requires go >= 1.26`)
+### 4. POST /staff/create returns validation error on password
+Check that the password satisfies all criteria:
+- Minimum 8 characters, maximum 32 characters
+- English characters and numbers only (no Thai characters or spaces)
+- At least 1 lowercase letter, 1 uppercase letter, 1 digit, and 1 special character (`!@#$%^&*...`)
+
+### 5. Dependency version conflicts (`requires go >= 1.26`)
 Avoid running `go get -u` across all packages, as it upgrades transitive dependencies to unreleased Go versions. Instead, install specific packages:
 ```bash
 go get <package-name>
