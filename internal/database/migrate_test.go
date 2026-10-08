@@ -41,7 +41,7 @@ func TestRunMigrations_RealFS(t *testing.T) {
 	}
 
 	// 3. Verify that expected domain tables exist
-	expectedTables := []string{"hospital", "staff", "patient"}
+	expectedTables := []string{"hospital", "staff", "patient", "staff_session"}
 	for _, table := range expectedTables {
 		var exists bool
 		query := `SELECT EXISTS (
