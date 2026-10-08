@@ -28,11 +28,28 @@ func New(cfg config.DBConfig) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open database connection: %w", err)
 	}
 
-	// Configure connection pooling
-	db.SetMaxOpenConns(defaultMaxOpenConns)
-	db.SetMaxIdleConns(defaultMaxIdleConns)
-	db.SetConnMaxLifetime(defaultConnMaxLifetime)
-	db.SetConnMaxIdleTime(defaultConnMaxIdleTime)
+	// Configure connection pooling with fallbacks to defaults
+	maxOpen := cfg.MaxOpenConns
+	if maxOpen <= 0 {
+		maxOpen = defaultMaxOpenConns
+	}
+	maxIdle := cfg.MaxIdleConns
+	if maxIdle <= 0 {
+		maxIdle = defaultMaxIdleConns
+	}
+	lifetime := time.Duration(cfg.ConnMaxLifetimeMin) * time.Minute
+	if lifetime <= 0 {
+		lifetime = defaultConnMaxLifetime
+	}
+	idleTime := time.Duration(cfg.ConnMaxIdleTimeMin) * time.Minute
+	if idleTime <= 0 {
+		idleTime = defaultConnMaxIdleTime
+	}
+
+	db.SetMaxOpenConns(maxOpen)
+	db.SetMaxIdleConns(maxIdle)
+	db.SetConnMaxLifetime(lifetime)
+	db.SetConnMaxIdleTime(idleTime)
 
 	// Verify connectivity with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), defaultPingTimeout)
