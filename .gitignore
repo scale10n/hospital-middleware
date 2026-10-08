@@ -1,35 +1,75 @@
-# Binaries and build artifacts
+# ==========================================
+# Binaries and Build Artifacts
+# ==========================================
 /bin/
+/api
+/main
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+
+# Test and profiling artifacts
 *.test
 *.out
+coverage.html
+*.prof
 
 # Go dependency directory (if using vendor mode)
 # /vendor/
 
-# Temporary and cache directories
+# ==========================================
+# Temporary and Cache Directories
+# ==========================================
 tmp/
 *.tmp
 
-# Environment variables and secrets
+# ==========================================
+# Environment Variables and Secrets
+# ==========================================
 .env
 .env.*
 !.env.example
 
-# Log files
+# ==========================================
+# SSL / TLS Certificates and Private Keys
+# ==========================================
+*.key
+*.crt
+*.pem
+*.csr
+*.srl
+*.p12
+*.pfx
+!nginx/ssl/.gitkeep
+
+# ==========================================
+# Local Database Storage (if mounted locally)
+# ==========================================
+postgres_data/
+pgdata/
+
+# ==========================================
+# Log Files
+# ==========================================
 *.log
 
-# IDE and Editor configurations
+# ==========================================
+# IDE and Editor Configurations
+# ==========================================
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
+*.sublime-project
+*.sublime-workspace
 
-# Operating System files
+# ==========================================
+# Operating System Files
+# ==========================================
 .DS_Store
 Thumbs.db
+ehthumbs.db
+desktop.ini
