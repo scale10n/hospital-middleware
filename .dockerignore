@@ -7,3 +7,8 @@ tmp/
 *.log
 Dockerfile
 docker-compose*.yml
+.env
+.env.*
+!.env.example
+nginx/
+README.md
