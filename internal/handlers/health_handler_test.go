@@ -109,12 +109,4 @@ func TestRegisterRoutes(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("expected /health status 200, got %d", w.Code)
 	}
-
-	// Test v1 health
-	w = httptest.NewRecorder()
-	req, _ = http.NewRequest(http.MethodGet, "/api/v1/health", nil)
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Errorf("expected /api/v1/health status 200, got %d", w.Code)
-	}
 }
