@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 
+	"hospital-middleware/internal/auth"
 	"hospital-middleware/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -117,8 +118,16 @@ func ErrorHandler() gin.HandlerFunc {
 		case errors.Is(err, service.ErrStaffAlreadyExists):
 			problem = NewProblemDetails(http.StatusConflict, "staff already exists", instance, "/errors/staff-already-exists")
 
-		case errors.Is(err, service.ErrInvalidCredentials):
+		case errors.Is(err, service.ErrInvalidCredentials),
+			errors.Is(err, auth.ErrInvalidToken):
 			problem = NewProblemDetails(http.StatusUnauthorized, "invalid username or password", instance, "/errors/unauthorized")
+
+		case errors.Is(err, service.ErrEmptySearchCriteria),
+			errors.Is(err, service.ErrInvalidDateOfBirth):
+			problem = NewProblemDetails(http.StatusBadRequest, err.Error(), instance, "/errors/validation-error")
+
+		case errors.Is(err, service.ErrInvalidHospitalID):
+			problem = NewProblemDetails(http.StatusUnauthorized, "hospital ID is required", instance, "/errors/unauthorized")
 
 		// Custom application errors
 		case errors.As(err, &appErr):

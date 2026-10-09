@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	tableFlag := flag.String("table", "all", "Specify table to seed ('all', 'hospital')")
+	tableFlag := flag.String("table", "all", "Specify table to seed ('all', 'hospital', 'patient')")
 	forceFlag := flag.Bool("force", false, "Force execution even in production environment")
 	flag.Parse()
 
@@ -48,8 +48,12 @@ func main() {
 		if err := seeds.SeedHospitals(ctx, db); err != nil {
 			log.Fatalf("[ERROR] Hospital seeder failed: %v", err)
 		}
+	case "patient":
+		if err := seeds.SeedPatients(ctx, db); err != nil {
+			log.Fatalf("[ERROR] Patient seeder failed: %v", err)
+		}
 	default:
-		log.Fatalf("[ERROR] Unknown table target %q. Available targets: 'all', 'hospital'", *tableFlag)
+		log.Fatalf("[ERROR] Unknown table target %q. Available targets: 'all', 'hospital', 'patient'", *tableFlag)
 	}
 
 	duration := time.Since(start).Round(time.Millisecond)

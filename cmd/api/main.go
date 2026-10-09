@@ -51,8 +51,17 @@ func setupRouter(db *sql.DB, cfgs ...*config.Config) *gin.Engine {
 	}
 	staffHandler := handlers.NewStaffHandlerWithService(staffService)
 
+	var patientService service.PatientService
+	if db != nil {
+		patientRepo := repository.NewPatientRepository(db)
+		patientService = service.NewPatientService(patientRepo)
+	} else {
+		patientService = service.NewPatientService(nil)
+	}
+	patientHandler := handlers.NewPatientHandler(patientService)
+
 	// Register application routes and middlewares
-	handlers.RegisterRoutes(router, healthHandler, staffHandler)
+	handlers.RegisterRoutes(router, healthHandler, staffHandler, patientHandler, jwtService)
 
 	return router
 }

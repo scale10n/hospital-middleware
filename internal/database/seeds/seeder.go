@@ -13,8 +13,10 @@ func RunAll(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("hospital seeder failed: %w", err)
 	}
 
-	// Additional future seeders (e.g. Staff, Patients) can be chained here:
-	// if err := SeedStaff(ctx, db); err != nil { return err }
+	// 2. Seed Patient mockup records
+	if err := SeedPatients(ctx, db); err != nil {
+		return fmt.Errorf("patient seeder failed: %w", err)
+	}
 
 	return nil
 }

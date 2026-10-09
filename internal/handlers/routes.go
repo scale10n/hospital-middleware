@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"time"
+
 	_ "hospital-middleware/docs" // Blank import for Swagger doc registration
+	"hospital-middleware/internal/auth"
 	"hospital-middleware/internal/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -10,7 +13,8 @@ import (
 )
 
 // RegisterRoutes configures global middleware, routes, and API groups.
-func RegisterRoutes(router *gin.Engine, healthHandler *HealthHandler, staffHandlers ...*StaffHandler) {
+// It accepts optional handler instances (*StaffHandler, *PatientHandler, auth.TokenService).
+func RegisterRoutes(router *gin.Engine, healthHandler *HealthHandler, optionalArgs ...any) {
 	// Register global middleware
 	router.Use(middleware.CORS())
 	router.Use(middleware.ErrorHandler())
@@ -19,19 +23,43 @@ func RegisterRoutes(router *gin.Engine, healthHandler *HealthHandler, staffHandl
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// Health
-	router.GET("/health", healthHandler.HealthCheck)
-
-	var staffHandler *StaffHandler
-	if len(staffHandlers) > 0 && staffHandlers[0] != nil {
-		staffHandler = staffHandlers[0]
-	} else {
-		staffHandler = NewStaffHandler()
+	if healthHandler != nil {
+		router.GET("/health", healthHandler.HealthCheck)
 	}
 
-	// Staff
+	var staffHandler *StaffHandler
+	var patientHandler *PatientHandler
+	var tokenService auth.TokenService
+
+	for _, arg := range optionalArgs {
+		switch v := arg.(type) {
+		case *StaffHandler:
+			staffHandler = v
+		case *PatientHandler:
+			patientHandler = v
+		case auth.TokenService:
+			tokenService = v
+		}
+	}
+
+	if staffHandler == nil {
+		staffHandler = NewStaffHandler()
+	}
+	if patientHandler == nil {
+		patientHandler = NewPatientHandler()
+	}
+	if tokenService == nil {
+		tokenService = auth.NewJWTService("hospital-middleware-default-secret-key-32bytes", 24*time.Hour)
+	}
+
+	// Staff routes
 	router.POST("/staff/create", staffHandler.CreateStaff)
 	router.POST("/staff/login", staffHandler.LoginStaff)
 
-	// TODO: implement patient handler
+	// Patient routes protected by CookieAuth
+	patientGroup := router.Group("/patient")
+	patientGroup.Use(middleware.CookieAuth(tokenService))
+	{
+		patientGroup.POST("/search", patientHandler.SearchPatients)
+	}
 }
-

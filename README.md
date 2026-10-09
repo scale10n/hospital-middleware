@@ -302,6 +302,7 @@ If developing Go code locally without running the API container:
 | `GET` | `/health` | Readiness probe & PostgreSQL DB check | `200 OK` | `application/json` |
 | `POST` | `/staff/create` | Validate hospital HN, create staff member, hash password, persist session & issue JWT | `201 Created` | `application/json` |
 | `POST` | `/staff/login` | Authenticate staff credentials, persist session & issue JWT | `200 OK` | `application/json` |
+| `POST` | `/patient/search` | Search patients within staff's hospital matching all provided criteria (CookieAuth) | `200 OK` | `application/json` |
 
 ---
 
@@ -391,6 +392,24 @@ The validation rules for `username`, `password`, and `hospital` are identical to
 - **`hospital`** *(required, string)*:
   - Must match an existing hospital HN in the database (e.g. `HOSP001`). If not found, returns `400 Bad Request` (`hospital not found`).
 
+#### `POST /patient/search` Query Parameters & Payload
+Accepts optional query parameters and/or JSON body:
+- **`national_id`** *(optional, string)*: Thai Citizen National ID.
+- **`passport_id`** *(optional, string)*: Passport number.
+- **`first_name`** *(optional, string)*: Patient first name in Thai or English (supports case-insensitive partial match via PostgreSQL `ILIKE`).
+- **`middle_name`** *(optional, string)*: Patient middle name in Thai or English (supports case-insensitive partial match via PostgreSQL `ILIKE`).
+- **`last_name`** *(optional, string)*: Patient last name in Thai or English (supports case-insensitive partial match via PostgreSQL `ILIKE`).
+- **`date_of_birth`** *(optional, string)*: Format `YYYY-MM-DD` (e.g. `1990-05-15`).
+- **`phone_number`** *(optional, string)*: Patient contact number.
+- **`email`** *(optional, string)*: Patient email address.
+
+**Rules & Constraints:**
+- **Authentication**: Requires valid JWT session cookie `session_token` issued at staff login (`CookieAuth`). Rejects unauthorized requests with `401 Unauthorized`.
+- **Hospital Isolation**: Results are strictly filtered to the authenticated staff member's hospital (`WHERE patient.hospital_id = staff.hospital_id`).
+- **Search Criteria**: At least one of the 8 search criteria above must be non-empty (rejects empty search queries with `400 Bad Request`).
+- **AND Logic**: Returns patients matching ALL provided filter criteria.
+- **Response Format**: JSend success envelope with patient details and total count (`total`).
+
 ---
 
 ### Testing via curl
@@ -463,6 +482,41 @@ curl -k -i -X POST https://localhost/staff/login \
     "session": {
       "expires_at": "2026-10-09T17:34:38.123456Z"
     }
+  }
+}
+```
+
+```bash
+# Patient Search (requires session_token cookie from login)
+curl -k -i -X POST "https://localhost/patient/search?first_name=Somchai" \
+  --cookie "session_token=<jwt_token>"
+```
+
+**HTTP 200 OK Response:**
+```json
+{
+  "status": "success",
+  "message": "patients retrieved successfully",
+  "data": {
+    "patients": [
+      {
+        "id": "c1f728ea-a312-4f35-905e-8b1d9bf5b012",
+        "patient_hn": "P00001",
+        "first_name_th": "สมชาย",
+        "middle_name_th": "วิชัย",
+        "last_name_th": "ใจดี",
+        "first_name_en": "Somchai",
+        "middle_name_en": "Wichai",
+        "last_name_en": "Jaidee",
+        "date_of_birth": "1985-04-12",
+        "national_id": "1100501234567",
+        "passport_id": "",
+        "phone_number": "0812345678",
+        "email": "somchai.jaidee@example.com",
+        "gender": "M"
+      }
+    ],
+    "total": 1
   }
 }
 ```
@@ -630,6 +684,9 @@ go run ./cmd/seed
 ```bash
 # Seed only the hospital table
 go run ./cmd/seed -table=hospital
+
+# Seed only the patient table (for /patient/search API testing)
+go run ./cmd/seed -table=patient
 ```
 
 #### 3. Seed in Production (Bypass Safeguard):
