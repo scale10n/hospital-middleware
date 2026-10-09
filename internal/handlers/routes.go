@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	_ "hospital-middleware/docs" // Blank import for Swagger doc registration
 	"hospital-middleware/internal/middleware"
 
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 // RegisterRoutes configures global middleware, routes, and API groups.
@@ -12,7 +15,10 @@ func RegisterRoutes(router *gin.Engine, healthHandler *HealthHandler, staffHandl
 	router.Use(middleware.CORS())
 	router.Use(middleware.ErrorHandler())
 
-	// Readiness and Health probes (root level for Docker/K8s)
+	// Swagger UI
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
+	// Health
 	router.GET("/health", healthHandler.HealthCheck)
 
 	var staffHandler *StaffHandler
@@ -22,9 +28,10 @@ func RegisterRoutes(router *gin.Engine, healthHandler *HealthHandler, staffHandl
 		staffHandler = NewStaffHandler()
 	}
 
-	// Staff routes (/staff/create)
-	staffGroup := router.Group("/staff")
-	{
-		staffHandler.RegisterRoutes(staffGroup)
-	}
+	// Staff
+	router.POST("/staff/create", staffHandler.CreateStaff)
+	router.POST("/staff/login", staffHandler.LoginStaff)
+
+	// TODO: implement patient handler
 }
+

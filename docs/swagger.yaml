@@ -1,0 +1,214 @@
+basePath: /
+definitions:
+  hospital-middleware_internal_response.Response-internal_handlers_CreateStaffOutput:
+    properties:
+      data:
+        allOf:
+        - $ref: '#/definitions/internal_handlers.CreateStaffOutput'
+        description: Payload data
+      message:
+        description: Human-readable status message
+        type: string
+      status:
+        description: '"success"'
+        type: string
+    type: object
+  hospital-middleware_internal_response.Response-internal_handlers_HealthResponse:
+    properties:
+      data:
+        allOf:
+        - $ref: '#/definitions/internal_handlers.HealthResponse'
+        description: Payload data
+      message:
+        description: Human-readable status message
+        type: string
+      status:
+        description: '"success"'
+        type: string
+    type: object
+  hospital-middleware_internal_response.Response-internal_handlers_LoginStaffOutput:
+    properties:
+      data:
+        allOf:
+        - $ref: '#/definitions/internal_handlers.LoginStaffOutput'
+        description: Payload data
+      message:
+        description: Human-readable status message
+        type: string
+      status:
+        description: '"success"'
+        type: string
+    type: object
+  hospital-middleware_internal_service.SessionInfoResponse:
+    properties:
+      expires_at:
+        type: string
+    type: object
+  hospital-middleware_internal_service.StaffInfoResponse:
+    properties:
+      created_at:
+        type: string
+      hospital_hn:
+        type: string
+      hospital_name:
+        type: string
+      id:
+        type: string
+      username:
+        type: string
+    type: object
+  internal_handlers.CreateStaffOutput:
+    properties:
+      session:
+        $ref: '#/definitions/hospital-middleware_internal_service.SessionInfoResponse'
+      staff:
+        $ref: '#/definitions/hospital-middleware_internal_service.StaffInfoResponse'
+    type: object
+  internal_handlers.CreateStaffRequest:
+    properties:
+      hospital:
+        type: string
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - hospital
+    - password
+    - username
+    type: object
+  internal_handlers.HealthResponse:
+    properties:
+      database:
+        example: connected
+        type: string
+      error:
+        example: ""
+        type: string
+      status:
+        example: healthy
+        type: string
+    type: object
+  internal_handlers.LoginStaffOutput:
+    properties:
+      session:
+        $ref: '#/definitions/hospital-middleware_internal_service.SessionInfoResponse'
+      staff:
+        $ref: '#/definitions/hospital-middleware_internal_service.StaffInfoResponse'
+    type: object
+  internal_handlers.LoginStaffRequest:
+    properties:
+      hospital:
+        type: string
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - hospital
+    - password
+    - username
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: Middleware service handling staff authentication and hospital integrations.
+  title: Hospital Middleware API
+  version: "1.0"
+paths:
+  /health:
+    get:
+      description: Check server and database connectivity status
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/hospital-middleware_internal_response.Response-internal_handlers_HealthResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/hospital-middleware_internal_response.Response-internal_handlers_HealthResponse'
+      summary: Liveness and Readiness probe
+      tags:
+      - Health
+  /staff/create:
+    post:
+      consumes:
+      - application/json
+      description: Register staff with hospital affiliation, username, and secure
+        password
+      parameters:
+      - description: Staff registration payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.CreateStaffRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/hospital-middleware_internal_response.Response-internal_handlers_CreateStaffOutput'
+        "400":
+          description: Validation error
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: Username already exists
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Create a new hospital staff member
+      tags:
+      - Staff
+  /staff/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate staff member and issue session cookie with JWT token
+      parameters:
+      - description: Staff login credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.LoginStaffRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/hospital-middleware_internal_response.Response-internal_handlers_LoginStaffOutput'
+        "400":
+          description: Bad request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Invalid username or password
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - CookieAuth: []
+      summary: Staff login authentication
+      tags:
+      - Staff
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer" followed by a space and the JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
+  CookieAuth:
+    description: Session token cookie for authenticated endpoints.
+    in: cookie
+    name: session_token
+    type: apiKey
+swagger: "2.0"

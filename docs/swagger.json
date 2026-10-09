@@ -1,0 +1,324 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Middleware service handling staff authentication and hospital integrations.",
+        "title": "Hospital Middleware API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/",
+    "paths": {
+        "/health": {
+            "get": {
+                "description": "Check server and database connectivity status",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Health"
+                ],
+                "summary": "Liveness and Readiness probe",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/hospital-middleware_internal_response.Response-internal_handlers_HealthResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/hospital-middleware_internal_response.Response-internal_handlers_HealthResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/staff/create": {
+            "post": {
+                "description": "Register staff with hospital affiliation, username, and secure password",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Staff"
+                ],
+                "summary": "Create a new hospital staff member",
+                "parameters": [
+                    {
+                        "description": "Staff registration payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.CreateStaffRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/hospital-middleware_internal_response.Response-internal_handlers_CreateStaffOutput"
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Username already exists",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/staff/login": {
+            "post": {
+                "security": [
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Authenticate staff member and issue session cookie with JWT token",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Staff"
+                ],
+                "summary": "Staff login authentication",
+                "parameters": [
+                    {
+                        "description": "Staff login credentials",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.LoginStaffRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/hospital-middleware_internal_response.Response-internal_handlers_LoginStaffOutput"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid username or password",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "hospital-middleware_internal_response.Response-internal_handlers_CreateStaffOutput": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "description": "Payload data",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_handlers.CreateStaffOutput"
+                        }
+                    ]
+                },
+                "message": {
+                    "description": "Human-readable status message",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "\"success\"",
+                    "type": "string"
+                }
+            }
+        },
+        "hospital-middleware_internal_response.Response-internal_handlers_HealthResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "description": "Payload data",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_handlers.HealthResponse"
+                        }
+                    ]
+                },
+                "message": {
+                    "description": "Human-readable status message",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "\"success\"",
+                    "type": "string"
+                }
+            }
+        },
+        "hospital-middleware_internal_response.Response-internal_handlers_LoginStaffOutput": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "description": "Payload data",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/internal_handlers.LoginStaffOutput"
+                        }
+                    ]
+                },
+                "message": {
+                    "description": "Human-readable status message",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "\"success\"",
+                    "type": "string"
+                }
+            }
+        },
+        "hospital-middleware_internal_service.SessionInfoResponse": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "hospital-middleware_internal_service.StaffInfoResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "hospital_hn": {
+                    "type": "string"
+                },
+                "hospital_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handlers.CreateStaffOutput": {
+            "type": "object",
+            "properties": {
+                "session": {
+                    "$ref": "#/definitions/hospital-middleware_internal_service.SessionInfoResponse"
+                },
+                "staff": {
+                    "$ref": "#/definitions/hospital-middleware_internal_service.StaffInfoResponse"
+                }
+            }
+        },
+        "internal_handlers.CreateStaffRequest": {
+            "type": "object",
+            "required": [
+                "hospital",
+                "password",
+                "username"
+            ],
+            "properties": {
+                "hospital": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handlers.HealthResponse": {
+            "type": "object",
+            "properties": {
+                "database": {
+                    "type": "string",
+                    "example": "connected"
+                },
+                "error": {
+                    "type": "string",
+                    "example": ""
+                },
+                "status": {
+                    "type": "string",
+                    "example": "healthy"
+                }
+            }
+        },
+        "internal_handlers.LoginStaffOutput": {
+            "type": "object",
+            "properties": {
+                "session": {
+                    "$ref": "#/definitions/hospital-middleware_internal_service.SessionInfoResponse"
+                },
+                "staff": {
+                    "$ref": "#/definitions/hospital-middleware_internal_service.StaffInfoResponse"
+                }
+            }
+        },
+        "internal_handlers.LoginStaffRequest": {
+            "type": "object",
+            "required": [
+                "hospital",
+                "password",
+                "username"
+            ],
+            "properties": {
+                "hospital": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "Type \"Bearer\" followed by a space and the JWT token.",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        },
+        "CookieAuth": {
+            "description": "Session token cookie for authenticated endpoints.",
+            "type": "apiKey",
+            "name": "session_token",
+            "in": "cookie"
+        }
+    }
+}

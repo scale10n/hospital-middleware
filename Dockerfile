@@ -31,6 +31,9 @@ USER appuser
 # Copy executable from builder
 COPY --from=builder /app/bin/api /app/api
 
+# Copy docs folder for Swagger UI
+COPY docs/ ./docs/
+
 EXPOSE 8080
 
 CMD ["/app/api"]

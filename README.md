@@ -18,6 +18,7 @@ A Go-based API middleware service built with [Gin Web Framework](https://github.
   - [4. Run Locally (Go Development)](#4-run-locally-go-development)
 - [API Endpoints & Testing](#api-endpoints--testing)
   - [Endpoints](#endpoints)
+  - [Interactive API Documentation (Swagger UI)](#interactive-api-documentation-swagger-ui)
   - [Request Validation Rules](#request-validation-rules)
   - [Testing via curl](#testing-via-curl)
   - [Error Handling (RFC 7807 Problem Details)](#error-handling-rfc-7807-problem-details)
@@ -46,6 +47,7 @@ A Go-based API middleware service built with [Gin Web Framework](https://github.
 - **Dockerized**: Multi-stage minimal non-root Alpine container with automated healthcheck orchestration on `bridge-network`.
 - **Database Migrations**: Embedded migrations (000001 through 000004) using `golang-migrate` and Go `embed.FS`.
 - **Database Seeder**: Standalone CLI tool (`cmd/seed`) with environment safety guards and idempotent single-transaction seeding.
+- **Interactive Swagger / OpenAPI 2.0**: Embedded Swagger UI served at `/swagger/*any` using `swaggo/gin-swagger`, providing interactive endpoint documentation, schemas, and live testing in both HTTP and HTTPS modes.
 
 ---
 
@@ -90,6 +92,10 @@ hospital-middleware/
 │   │   └── main_test.go                  # API route integration tests (mocked & live DB)
 │   └── seed/
 │       └── main.go                       # Standalone database seeder CLI
+├── docs/                                 # Auto-generated Swagger/OpenAPI documentation
+│   ├── docs.go                           # Go package registering Swagger specification
+│   ├── swagger.json                      # OpenAPI specification in JSON
+│   └── swagger.yaml                      # OpenAPI specification in YAML
 ├── internal/
 │   ├── auth/                             # Authentication & JWT token service (HS256)
 │   │   ├── jwt.go                        # Token generator & claims validator
@@ -167,6 +173,7 @@ hospital-middleware/
 - **Docker**: `20.10+` (or Docker Desktop)
 - **Docker Compose**: `v2+`
 - **Go**: `1.25.0` or higher *(only if developing/running outside Docker)*
+- **swag CLI**: *(optional/recommended, for generating Swagger documentation)*: `go install github.com/swaggo/swag/cmd/swag@latest`
 - **OpenSSL**: *(used to generate local SSL certificates; Docker fallback is automatic)*
 - **golang-migrate**: *(optional, for running CLI migrations manually)*
 
@@ -291,9 +298,45 @@ If developing Go code locally without running the API container:
 
 | Method | Endpoint | Description | Status Code | Content-Type |
 | :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/swagger/*any` | Interactive Swagger UI API documentation | `200 OK` | `text/html` |
 | `GET` | `/health` | Readiness probe & PostgreSQL DB check | `200 OK` | `application/json` |
 | `POST` | `/staff/create` | Validate hospital HN, create staff member, hash password, persist session & issue JWT | `201 Created` | `application/json` |
 | `POST` | `/staff/login` | Authenticate staff credentials, persist session & issue JWT | `200 OK` | `application/json` |
+
+---
+
+### Interactive API Documentation (Swagger UI)
+
+The API includes embedded, self-contained interactive documentation powered by Swagger UI.
+
+#### Access Swagger UI:
+- **Direct (Local Dev)**: [http://localhost:8080/swagger/index.html](http://localhost:8080/swagger/index.html)
+- **Via Nginx (HTTPS)**: [https://localhost/swagger/index.html](https://localhost/swagger/index.html)
+- **Raw JSON Spec**: `http://localhost:8080/swagger/doc.json`
+
+#### CLI Tool Installation (`swag`):
+To generate or update Swagger documentation from code annotations, install the `swag` CLI tool:
+```bash
+# Ensure Go bin directory is in PATH
+export PATH=$PATH:$HOME/go/bin
+
+# Install swag CLI
+go install github.com/swaggo/swag/cmd/swag@latest
+
+# Verify installation
+swag --version
+```
+
+#### Regenerating Swagger Docs:
+Whenever you add or update API annotations in `cmd/api/main.go` or `internal/handlers/*.go`, run:
+```bash
+swag init -g cmd/api/main.go -o ./docs --parseDependency --parseInternal
+```
+
+The generated files are saved into the [`docs/`](docs/) directory:
+- `docs/docs.go`: Go source code registering the specification with Swagger at runtime.
+- `docs/swagger.json`: OpenAPI 2.0 JSON specification.
+- `docs/swagger.yaml`: OpenAPI 2.0 YAML specification.
 
 ---
 

@@ -83,6 +83,12 @@ type LoginStaffRequest struct {
 	Hospital string `json:"hospital" binding:"required"`
 }
 
+// CreateStaffOutput represents the response payload for staff creation.
+type CreateStaffOutput = service.StaffResponseData
+
+// LoginStaffOutput represents the response payload for staff login.
+type LoginStaffOutput = service.StaffResponseData
+
 // StaffHandler handles staff-related HTTP transport requests.
 type StaffHandler struct {
 	staffService service.StaffService
@@ -115,6 +121,16 @@ func (h *StaffHandler) RegisterRoutes(rg *gin.RouterGroup) {
 
 // CreateStaff handles POST /staff/create requests:
 // Binds request JSON, delegates to StaffService, attaches errors to context, and returns 201 on success.
+// @Summary      Create a new hospital staff member
+// @Description  Register staff with hospital affiliation, username, and secure password
+// @Tags         Staff
+// @Accept       json
+// @Produce      json
+// @Param        request body CreateStaffRequest true "Staff registration payload"
+// @Success      201 {object} response.Response[CreateStaffOutput]
+// @Failure      400 {object} map[string]interface{} "Validation error"
+// @Failure      409 {object} map[string]interface{} "Username already exists"
+// @Router       /staff/create [post]
 func (h *StaffHandler) CreateStaff(c *gin.Context) {
 	var req CreateStaffRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -161,6 +177,17 @@ func (h *StaffHandler) CreateStaff(c *gin.Context) {
 
 // LoginStaff handles POST /staff/login requests:
 // Binds request JSON, authenticates with StaffService, sets session cookie, and returns 200 OK.
+// @Summary      Staff login authentication
+// @Description  Authenticate staff member and issue session cookie with JWT token
+// @Tags         Staff
+// @Accept       json
+// @Produce      json
+// @Param        request body LoginStaffRequest true "Staff login credentials"
+// @Success      200 {object} response.Response[LoginStaffOutput]
+// @Failure      400 {object} map[string]interface{} "Bad request"
+// @Failure      401 {object} map[string]interface{} "Invalid username or password"
+// @Router       /staff/login [post]
+// @Security     CookieAuth
 func (h *StaffHandler) LoginStaff(c *gin.Context) {
 	var req LoginStaffRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

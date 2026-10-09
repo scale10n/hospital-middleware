@@ -109,4 +109,14 @@ func TestRegisterRoutes(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("expected /health status 200, got %d", w.Code)
 	}
+
+	// Test Swagger UI endpoint
+	wSwagger := httptest.NewRecorder()
+	reqSwagger, _ := http.NewRequest(http.MethodGet, "/swagger/index.html", nil)
+	reqSwagger.RequestURI = "/swagger/index.html"
+	r.ServeHTTP(wSwagger, reqSwagger)
+	if wSwagger.Code != http.StatusOK {
+		t.Logf("swagger response body: %s", wSwagger.Body.String())
+		t.Errorf("expected /swagger/index.html status 200, got %d", wSwagger.Code)
+	}
 }

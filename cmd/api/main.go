@@ -57,6 +57,22 @@ func setupRouter(db *sql.DB, cfgs ...*config.Config) *gin.Engine {
 	return router
 }
 
+// @title                      Hospital Middleware API
+// @version                    1.0
+// @description                Middleware service handling staff authentication and hospital integrations.
+//
+// @host                       localhost:8080
+// @BasePath                   /
+//
+// @securityDefinitions.apikey CookieAuth
+// @in                         cookie
+// @name                       session_token
+// @description                Session token cookie for authenticated endpoints.
+//
+// @securityDefinitions.apikey BearerAuth
+// @in                         header
+// @name                       Authorization
+// @description                Type "Bearer" followed by a space and the JWT token.
 func main() {
 	// Load application configuration from .env and environment variables
 	cfg := config.Load()

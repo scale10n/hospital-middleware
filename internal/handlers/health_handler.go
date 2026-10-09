@@ -6,8 +6,17 @@ import (
 	"reflect"
 	"time"
 
+	_ "hospital-middleware/internal/response"
+
 	"github.com/gin-gonic/gin"
 )
+
+// HealthResponse represents the health check response payload.
+type HealthResponse struct {
+	Status   string `json:"status" example:"healthy"`
+	Database string `json:"database" example:"connected"`
+	Error    string `json:"error,omitempty" example:""`
+}
 
 // DBPinger defines an interface for testing database connectivity.
 // This decouples the handler from a concrete *sql.DB and enables easy mocking.
@@ -29,6 +38,13 @@ func NewHealthHandler(db DBPinger) *HealthHandler {
 }
 
 // HealthCheck handles readiness probe requests (GET /health).
+// @Summary      Liveness and Readiness probe
+// @Description  Check server and database connectivity status
+// @Tags         Health
+// @Produce      json
+// @Success      200 {object} response.Response[HealthResponse]
+// @Failure      503 {object} response.Response[HealthResponse]
+// @Router       /health [get]
 func (h *HealthHandler) HealthCheck(c *gin.Context) {
 	if h.db == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
