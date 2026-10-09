@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -52,6 +53,7 @@ func (j *JWTService) GenerateToken(staffID, hospitalID, username string) (string
 		HospitalID: hospitalID,
 		Username:   username,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        strconv.FormatInt(now.UnixNano(), 10),
 			ExpiresAt: jwt.NewNumericDate(now.Add(j.duration)),
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now),

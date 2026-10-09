@@ -107,6 +107,48 @@ func TestErrorHandler_RFC7807_StaffAlreadyExists(t *testing.T) {
 	}
 }
 
+func TestErrorHandler_RFC7807_InvalidCredentials(t *testing.T) {
+	r := gin.New()
+	r.Use(middleware.ErrorHandler())
+	r.GET("/login-error", func(c *gin.Context) {
+		_ = c.Error(service.ErrInvalidCredentials)
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/login-error", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != middleware.ContentTypeProblemJSON {
+		t.Errorf("expected Content-Type %q, got %q", middleware.ContentTypeProblemJSON, contentType)
+	}
+
+	var problem middleware.ProblemDetails
+	if err := json.Unmarshal(w.Body.Bytes(), &problem); err != nil {
+		t.Fatalf("failed to unmarshal ProblemDetails JSON: %v", err)
+	}
+
+	if problem.Status != http.StatusUnauthorized {
+		t.Errorf("expected status 401, got %d", problem.Status)
+	}
+	if problem.Title != "Unauthorized" {
+		t.Errorf("expected title 'Unauthorized', got %q", problem.Title)
+	}
+	if problem.Detail != "invalid username or password" {
+		t.Errorf("expected detail 'invalid username or password', got %q", problem.Detail)
+	}
+	if problem.Type != "/errors/unauthorized" {
+		t.Errorf("expected type '/errors/unauthorized', got %q", problem.Type)
+	}
+	if problem.Instance != "/login-error" {
+		t.Errorf("expected instance '/login-error', got %q", problem.Instance)
+	}
+}
+
 func TestErrorHandler_RFC7807_CustomAppError(t *testing.T) {
 	r := gin.New()
 	r.Use(middleware.ErrorHandler())

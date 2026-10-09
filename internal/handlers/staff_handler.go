@@ -76,6 +76,13 @@ type CreateStaffRequest struct {
 	Hospital string `json:"hospital" binding:"required"`
 }
 
+// LoginStaffRequest represents the payload for logging in a staff member.
+type LoginStaffRequest struct {
+	Username string `json:"username" binding:"required,alphanum"`
+	Password string `json:"password" binding:"required,password"`
+	Hospital string `json:"hospital" binding:"required"`
+}
+
 // StaffHandler handles staff-related HTTP transport requests.
 type StaffHandler struct {
 	staffService service.StaffService
@@ -103,6 +110,7 @@ func NewStaffHandlerWithService(staffService service.StaffService) *StaffHandler
 // RegisterRoutes registers staff endpoints onto the given Gin router group.
 func (h *StaffHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/create", h.CreateStaff)
+	rg.POST("/login", h.LoginStaff)
 }
 
 // CreateStaff handles POST /staff/create requests:
@@ -149,4 +157,50 @@ func (h *StaffHandler) CreateStaff(c *gin.Context) {
 	)
 
 	c.JSON(http.StatusCreated, response.Success(output.Staff, "staff created successfully"))
+}
+
+// LoginStaff handles POST /staff/login requests:
+// Binds request JSON, authenticates with StaffService, sets session cookie, and returns 200 OK.
+func (h *StaffHandler) LoginStaff(c *gin.Context) {
+	var req LoginStaffRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(err)
+		return
+	}
+
+	input := service.LoginStaffInput{
+		Username: req.Username,
+		Password: req.Password,
+		Hospital: req.Hospital,
+	}
+
+	output, err := h.staffService.LoginStaff(c.Request.Context(), input)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+
+	// Set SameSite mode for CSRF mitigation
+	c.SetSameSite(http.SameSiteLaxMode)
+
+	// Set HttpOnly session cookie on the client response
+	secure := c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https"
+	maxAge := 86400
+	if output != nil && output.Staff != nil && !output.Staff.Session.ExpiresAt.IsZero() {
+		if sec := int(time.Until(output.Staff.Session.ExpiresAt).Seconds()); sec > 0 {
+			maxAge = sec
+		}
+	}
+
+	c.SetCookie(
+		"session_token",
+		output.Token,
+		maxAge,
+		"/",
+		"",
+		secure,
+		true, // HttpOnly: prevents client-side script from accessing the cookie (XSS protection)
+	)
+
+	c.JSON(http.StatusOK, response.Success(output.Staff, "login successful"))
 }

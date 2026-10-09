@@ -117,6 +117,9 @@ func ErrorHandler() gin.HandlerFunc {
 		case errors.Is(err, service.ErrStaffAlreadyExists):
 			problem = NewProblemDetails(http.StatusConflict, "staff already exists", instance, "/errors/staff-already-exists")
 
+		case errors.Is(err, service.ErrInvalidCredentials):
+			problem = NewProblemDetails(http.StatusUnauthorized, "invalid username or password", instance, "/errors/unauthorized")
+
 		// Custom application errors
 		case errors.As(err, &appErr):
 			title := appErr.Title

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"hospital-middleware/internal/models"
 )
@@ -11,6 +12,7 @@ import (
 type StaffRepository interface {
 	Create(ctx context.Context, staff *models.Staff) (*models.Staff, error)
 	FindByHospitalAndUsername(ctx context.Context, hospitalID string, username string) (*models.Staff, error)
+	FindByUsername(ctx context.Context, username string) (*models.Staff, error)
 	ExistsByHospitalAndUsername(ctx context.Context, hospitalID string, username string) (bool, error)
 }
 
@@ -50,6 +52,28 @@ func (r *sqlStaffRepository) FindByHospitalAndUsername(ctx context.Context, hosp
 	err := r.db.QueryRowContext(ctx, query, hospitalID, username).
 		Scan(&s.ID, &s.HospitalID, &s.Username, &s.PasswordHash, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &s, nil
+}
+
+// FindByUsername retrieves a staff record by username.
+func (r *sqlStaffRepository) FindByUsername(ctx context.Context, username string) (*models.Staff, error) {
+	query := `
+		SELECT id, hospital_id, username, password_hash, created_at, updated_at
+		FROM staff
+		WHERE username = $1
+	`
+	var s models.Staff
+	err := r.db.QueryRowContext(ctx, query, username).
+		Scan(&s.ID, &s.HospitalID, &s.Username, &s.PasswordHash, &s.CreatedAt, &s.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &s, nil

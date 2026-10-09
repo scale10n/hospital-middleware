@@ -83,4 +83,41 @@ func TestStaffRepository_LiveDB(t *testing.T) {
 	if found == nil || found.ID != created.ID {
 		t.Errorf("expected found staff ID %v, got %+v", created.ID, found)
 	}
+
+	// 5. Find by username
+	foundByUname, err := staffRepo.FindByUsername(ctx, testUsername)
+	if err != nil {
+		t.Fatalf("unexpected error finding staff by username: %v", err)
+	}
+	if foundByUname == nil || foundByUname.ID != created.ID {
+		t.Errorf("expected found staff ID %v, got %+v", created.ID, foundByUname)
+	}
+
+	// 6. Find non-existent username
+	notFound, err := staffRepo.FindByUsername(ctx, "non_existent_staff_xyz")
+	if err != nil {
+		t.Fatalf("unexpected error querying non-existent username: %v", err)
+	}
+	if notFound != nil {
+		t.Errorf("expected nil for non-existent staff, got %+v", notFound)
+	}
+
+	// 7. Find non-existent staff by hospital and username
+	notFoundByHosp, err := staffRepo.FindByHospitalAndUsername(ctx, hosp.ID, "non_existent_staff_xyz")
+	if err != nil {
+		t.Fatalf("unexpected error querying non-existent staff by hospital and username: %v", err)
+	}
+	if notFoundByHosp != nil {
+		t.Errorf("expected nil for non-existent staff, got %+v", notFoundByHosp)
+	}
+
+	// 8. SQL Injection payload safety
+	sqlInjPayload := "' OR '1'='1'; DROP TABLE staff; --"
+	injFound, err := staffRepo.FindByHospitalAndUsername(ctx, hosp.ID, sqlInjPayload)
+	if err != nil {
+		t.Fatalf("unexpected error executing query with SQL injection string: %v", err)
+	}
+	if injFound != nil {
+		t.Errorf("expected nil for SQL injection query, got %+v", injFound)
+	}
 }

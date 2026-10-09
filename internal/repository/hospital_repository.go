@@ -12,6 +12,7 @@ import (
 type HospitalRepository interface {
 	ExistsByHN(ctx context.Context, hn string) (bool, error)
 	FindByHN(ctx context.Context, hn string) (*models.Hospital, error)
+	FindByID(ctx context.Context, id string) (*models.Hospital, error)
 }
 
 type sqlHospitalRepository struct {
@@ -36,6 +37,20 @@ func (r *sqlHospitalRepository) FindByHN(ctx context.Context, hn string) (*model
 	query := `SELECT id, hn, name, created_at, updated_at FROM hospital WHERE hn = $1`
 	var h models.Hospital
 	err := r.db.QueryRowContext(ctx, query, hn).Scan(&h.ID, &h.HN, &h.Name, &h.CreatedAt, &h.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &h, nil
+}
+
+// FindByID retrieves a hospital record by its UUID.
+func (r *sqlHospitalRepository) FindByID(ctx context.Context, id string) (*models.Hospital, error) {
+	query := `SELECT id, hn, name, created_at, updated_at FROM hospital WHERE id = $1`
+	var h models.Hospital
+	err := r.db.QueryRowContext(ctx, query, id).Scan(&h.ID, &h.HN, &h.Name, &h.CreatedAt, &h.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil

@@ -109,7 +109,7 @@ hospital-middleware/
 │   ├── handlers/
 │   │   ├── health_handler.go             # Health & readiness probe HTTP handlers
 │   │   ├── health_handler_test.go        # Health handler unit tests (mocked DB)
-│   │   ├── staff_handler.go              # Staff HTTP handler (/staff/create) & password validator
+│   │   ├── staff_handler.go              # Staff HTTP handler (/staff/create, /staff/login) & password validator
 │   │   ├── staff_handler_test.go         # Staff handler unit tests
 │   │   └── routes.go                     # Route registration & global middleware attachment
 │   ├── middleware/
@@ -293,6 +293,7 @@ If developing Go code locally without running the API container:
 | :--- | :--- | :--- | :--- | :--- |
 | `GET` | `/health` | Readiness probe & PostgreSQL DB check | `200 OK` | `application/json` |
 | `POST` | `/staff/create` | Validate hospital HN, create staff member, hash password, persist session & issue JWT | `201 Created` | `application/json` |
+| `POST` | `/staff/login` | Authenticate staff credentials, persist session & issue JWT | `200 OK` | `application/json` |
 
 ---
 
@@ -322,6 +323,31 @@ If developing Go code locally without running the API container:
 - **`hospital`** *(required, string)*:
   - Must match an existing hospital HN in the database (e.g. `HOSP001`).
 
+#### `POST /staff/login` Request Payload
+```json
+{
+  "username": "somchai",
+  "password": "Password123!",
+  "hospital": "HOSP001"
+}
+```
+
+The validation rules for `username`, `password`, and `hospital` are identical to `POST /staff/create`:
+- **`username`** *(required, string)*:
+  - Must be strictly alphanumeric (`[a-zA-Z0-9]`).
+  - Thai characters, spaces, and punctuation/special characters are rejected (`400 Bad Request`).
+- **`password`** *(required, string)*:
+  - Length: between 8 and 32 characters.
+  - Allowed characters: English letters, numbers, and allowed ASCII symbols (`!@#$%^&*()-_=+[]{}|;:'",.<>/?`~\\`).
+  - Character requirements:
+    - At least 1 lowercase letter (`a-z`)
+    - At least 1 uppercase letter (`A-Z`)
+    - At least 1 digit (`0-9`)
+    - At least 1 special character
+  - Rejects Thai characters, emojis, spaces, and non-ASCII characters (`400 Bad Request`).
+- **`hospital`** *(required, string)*:
+  - Must match an existing hospital HN in the database (e.g. `HOSP001`). If not found, returns `400 Bad Request` (`hospital not found`).
+
 ---
 
 ### Testing via curl
@@ -350,6 +376,39 @@ curl -k -i -X POST https://localhost/staff/create \
 {
   "status": "success",
   "message": "staff created successfully",
+  "data": {
+    "staff": {
+      "id": "76ec965b-bf50-48b4-82a4-7935f8c6ebf7",
+      "username": "somchai",
+      "hospital_hn": "HOSP001",
+      "hospital_name": "Bangkok General Hospital",
+      "created_at": "2026-10-08T17:34:38.123456Z"
+    },
+    "session": {
+      "expires_at": "2026-10-09T17:34:38.123456Z"
+    }
+  }
+}
+```
+
+```bash
+# Staff Login (JSend / Custom Envelope response & HttpOnly cookie)
+curl -k -i -X POST https://localhost/staff/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "somchai",
+    "password": "Password123!",
+    "hospital": "HOSP001"
+  }'
+```
+
+**HTTP 200 OK Response:**
+- Header: `Set-Cookie: session_token=<jwt_token>; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax; [Secure]`
+- Response Body:
+```json
+{
+  "status": "success",
+  "message": "login successful",
   "data": {
     "staff": {
       "id": "76ec965b-bf50-48b4-82a4-7935f8c6ebf7",
@@ -438,6 +497,19 @@ Returned when username format or password security policy rules fail:
   "detail": "Key: 'CreateStaffRequest.Password' Error:Field validation for 'Password' failed on the 'password' tag",
   "instance": "/staff/create",
   "error": "Key: 'CreateStaffRequest.Password' Error:Field validation for 'Password' failed on the 'password' tag"
+}
+```
+
+#### 4. Invalid Credentials (`401 Unauthorized`)
+Returned on `POST /staff/login` when the username is not found or password does not match:
+```json
+{
+  "type": "/errors/unauthorized",
+  "title": "Unauthorized",
+  "status": 401,
+  "detail": "invalid username or password",
+  "instance": "/staff/login",
+  "error": "invalid username or password"
 }
 ```
 

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"hospital-middleware/internal/config"
 	"hospital-middleware/internal/database"
@@ -161,4 +162,191 @@ func TestStaffCreateRoute_RealDB(t *testing.T) {
 	if errResp.Status != http.StatusBadRequest {
 		t.Errorf("expected status 400, got %d", errResp.Status)
 	}
+}
+
+func TestStaffLoginRoute_NilDB(t *testing.T) {
+	router := setupRouter(nil)
+
+	payload := `{"username":"tester","password":"Password123!","hospital":"HOSP001"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader([]byte(payload)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500 when db is nil, got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	var response middleware.ProblemDetails
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to parse json response: %v", err)
+	}
+
+	if response.Status != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d", response.Status)
+	}
+}
+
+func TestStaffLoginRoute_RealDB(t *testing.T) {
+	cfg := config.Load()
+	db, err := database.New(cfg.DB)
+	if err != nil {
+		t.Skipf("skipping test: database connection not available: %v", err)
+	}
+	defer db.Close()
+
+	// Clean up tester username before and after test for idempotency
+	_, _ = db.Exec("DELETE FROM staff WHERE username = $1", "logintester")
+	defer func() {
+		_, _ = db.Exec("DELETE FROM staff WHERE username = $1", "logintester")
+	}()
+
+	router := setupRouter(db)
+
+	// Create a staff user first
+	createPayload := `{"username":"logintester","password":"Password123!","hospital":"HOSP001"}`
+	wCreate := httptest.NewRecorder()
+	reqCreate, _ := http.NewRequest(http.MethodPost, "/staff/create", bytes.NewReader([]byte(createPayload)))
+	reqCreate.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(wCreate, reqCreate)
+
+	if wCreate.Code != http.StatusCreated {
+		t.Fatalf("failed to seed staff for login test: %d, body: %s", wCreate.Code, wCreate.Body.String())
+	}
+
+	// 1. Success case: valid login (Measure response time < 200ms)
+	loginPayload := `{"username":"logintester","password":"Password123!","hospital":"HOSP001"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader([]byte(loginPayload)))
+	req.Header.Set("Content-Type", "application/json")
+
+	start := time.Now()
+	router.ServeHTTP(w, req)
+	elapsed := time.Since(start)
+
+	t.Logf("POST /staff/login response time: %v", elapsed)
+	if elapsed >= 200*time.Millisecond {
+		t.Errorf("expected response time < 200ms, got %v", elapsed)
+	}
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	var resp response.Response[service.StaffResponseData]
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse json response: %v", err)
+	}
+
+	if resp.Status != "success" {
+		t.Errorf("expected status 'success', got %q", resp.Status)
+	}
+	if resp.Message != "login successful" {
+		t.Errorf("expected message 'login successful', got %q", resp.Message)
+	}
+	if resp.Data.Staff.Username != "logintester" {
+		t.Errorf("expected username 'logintester', got %q", resp.Data.Staff.Username)
+	}
+	if resp.Data.Staff.HospitalHN != "HOSP001" {
+		t.Errorf("expected hospital 'HOSP001', got %q", resp.Data.Staff.HospitalHN)
+	}
+
+	// Verify Set-Cookie
+	cookieHeader := w.Header().Get("Set-Cookie")
+	if !strings.Contains(cookieHeader, "session_token=") {
+		t.Errorf("expected Set-Cookie to contain session_token, got %q", cookieHeader)
+	}
+
+	// 2. Failure case: wrong password
+	badPwPayload := `{"username":"logintester","password":"WrongPassword123!","hospital":"HOSP001"}`
+	wBadPw := httptest.NewRecorder()
+	reqBadPw, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader([]byte(badPwPayload)))
+	reqBadPw.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(wBadPw, reqBadPw)
+
+	if wBadPw.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d. Body: %s", wBadPw.Code, wBadPw.Body.String())
+	}
+
+	// 3. Failure case: unknown username
+	unknownPayload := `{"username":"unknownuser123","password":"Password123!","hospital":"HOSP001"}`
+	wUnknown := httptest.NewRecorder()
+	reqUnknown, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader([]byte(unknownPayload)))
+	reqUnknown.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(wUnknown, reqUnknown)
+
+	if wUnknown.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d. Body: %s", wUnknown.Code, wUnknown.Body.String())
+	}
+
+	// 4. Failure case: unknown hospital HN
+	unknownHospPayload := `{"username":"logintester","password":"Password123!","hospital":"UNKNOWN_HN"}`
+	wUnknownHosp := httptest.NewRecorder()
+	reqUnknownHosp, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader([]byte(unknownHospPayload)))
+	reqUnknownHosp.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(wUnknownHosp, reqUnknownHosp)
+
+	if wUnknownHosp.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400 when hospital does not exist, got %d. Body: %s", wUnknownHosp.Code, wUnknownHosp.Body.String())
+	}
+
+	var unknownHospResp middleware.ProblemDetails
+	if err := json.Unmarshal(wUnknownHosp.Body.Bytes(), &unknownHospResp); err != nil {
+		t.Fatalf("failed to parse problem details: %v", err)
+	}
+	if unknownHospResp.Detail != "hospital not found" {
+		t.Errorf("expected detail 'hospital not found', got %q", unknownHospResp.Detail)
+	}
+
+	// 5. Failure case: missing hospital
+	missingHospPayload := `{"username":"logintester","password":"Password123!"}`
+	wMissingHosp := httptest.NewRecorder()
+	reqMissingHosp, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader([]byte(missingHospPayload)))
+	reqMissingHosp.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(wMissingHosp, reqMissingHosp)
+
+	if wMissingHosp.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400 when hospital is missing, got %d. Body: %s", wMissingHosp.Code, wMissingHosp.Body.String())
+	}
+
+	// 6. Security verification: SQL Injection payload in hospital parameter
+	sqlInjPayload := `{"username":"logintester","password":"Password123!","hospital":"' OR '1'='1; --"}`
+	wInj := httptest.NewRecorder()
+	reqInj, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader([]byte(sqlInjPayload)))
+	reqInj.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(wInj, reqInj)
+
+	if wInj.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400 for SQL injection attempt, got %d. Body: %s", wInj.Code, wInj.Body.String())
+	}
+	var sqlInjResp middleware.ProblemDetails
+	if err := json.Unmarshal(wInj.Body.Bytes(), &sqlInjResp); err != nil {
+		t.Fatalf("failed to parse problem details: %v", err)
+	}
+	if sqlInjResp.Detail != "hospital not found" {
+		t.Errorf("expected detail 'hospital not found', got %q", sqlInjResp.Detail)
+	}
+
+	// 7. Performance verification: Response time < 200ms for typical queries
+	const iterations = 10
+	var totalDuration time.Duration
+	for i := 0; i < iterations; i++ {
+		wPerf := httptest.NewRecorder()
+		reqPerf, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader([]byte(loginPayload)))
+		reqPerf.Header.Set("Content-Type", "application/json")
+
+		iterStart := time.Now()
+		router.ServeHTTP(wPerf, reqPerf)
+		iterElapsed := time.Since(iterStart)
+
+		totalDuration += iterElapsed
+		if iterElapsed >= 200*time.Millisecond {
+			t.Errorf("iteration %d: expected response time < 200ms, got %v", i+1, iterElapsed)
+		}
+		if wPerf.Code != http.StatusOK {
+			t.Errorf("iteration %d: expected status 200, got %d", i+1, wPerf.Code)
+		}
+	}
+	avgDuration := totalDuration / iterations
+	t.Logf("POST /staff/login average response time over %d iterations: %v (target: < 200ms)", iterations, avgDuration)
 }

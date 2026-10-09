@@ -20,8 +20,10 @@ import (
 
 // mockStaffService implements service.StaffService for handler testing.
 type mockStaffService struct {
-	output *service.CreateStaffResult
-	err    error
+	output      *service.CreateStaffResult
+	loginOutput *service.LoginStaffResult
+	err         error
+	loginErr    error
 }
 
 func (m *mockStaffService) CreateStaff(ctx context.Context, input service.CreateStaffInput) (*service.CreateStaffResult, error) {
@@ -48,10 +50,42 @@ func (m *mockStaffService) CreateStaff(ctx context.Context, input service.Create
 	}, nil
 }
 
+func (m *mockStaffService) LoginStaff(ctx context.Context, input service.LoginStaffInput) (*service.LoginStaffResult, error) {
+	if m.loginErr != nil {
+		return nil, m.loginErr
+	}
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.loginOutput != nil {
+		return m.loginOutput, nil
+	}
+	hospHN := input.Hospital
+	if hospHN == "" {
+		hospHN = "HOSP001"
+	}
+	return &service.LoginStaffResult{
+		Staff: &service.StaffResponseData{
+			Staff: service.StaffInfoResponse{
+				ID:           "mock-staff-id",
+				Username:     input.Username,
+				HospitalHN:   hospHN,
+				HospitalName: "Mock Hospital",
+				CreatedAt:    time.Now(),
+			},
+			Session: service.SessionInfoResponse{
+				ExpiresAt: time.Now().Add(24 * time.Hour),
+			},
+		},
+		Token: "mock-jwt-session-token",
+	}, nil
+}
+
 func newTestStaffRouter(handler *StaffHandler) *gin.Engine {
 	r := gin.New()
 	r.Use(middleware.ErrorHandler())
 	r.POST("/staff/create", handler.CreateStaff)
+	r.POST("/staff/login", handler.LoginStaff)
 	return r
 }
 
@@ -571,5 +605,264 @@ func TestStaffHandler_IntegratedRegisterRoutes(t *testing.T) {
 
 	if w.Code != http.StatusCreated {
 		t.Errorf("expected /staff/create status 201, got %d", w.Code)
+	}
+
+	// Test root /staff/login
+	loginPayload := []byte(`{"username":"admin","password":"Password123!","hospital":"HOSP001"}`)
+	wLogin := httptest.NewRecorder()
+	reqLogin, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader(loginPayload))
+	reqLogin.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(wLogin, reqLogin)
+
+	if wLogin.Code != http.StatusOK {
+		t.Errorf("expected /staff/login status 200, got %d", wLogin.Code)
+	}
+}
+
+func TestStaffHandler_LoginStaff_Success(t *testing.T) {
+	mockSvc := &mockStaffService{}
+	handler := NewStaffHandlerWithService(mockSvc)
+	r := newTestStaffRouter(handler)
+
+	reqPayload := LoginStaffRequest{
+		Username: "stafftestuser",
+		Password: "SuperSecret123!",
+		Hospital: "HOSP001",
+	}
+	body, err := json.Marshal(reqPayload)
+	if err != nil {
+		t.Fatalf("failed to marshal request payload: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	var resp response.Response[service.StaffResponseData]
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response JSON: %v", err)
+	}
+
+	if resp.Status != "success" {
+		t.Errorf("expected status 'success', got %q", resp.Status)
+	}
+	if resp.Message != "login successful" {
+		t.Errorf("expected message 'login successful', got %q", resp.Message)
+	}
+	if resp.Data.Staff.Username != reqPayload.Username {
+		t.Errorf("expected username %q, got %q", reqPayload.Username, resp.Data.Staff.Username)
+	}
+	if resp.Data.Staff.HospitalHN != "HOSP001" {
+		t.Errorf("expected hospital 'HOSP001', got %q", resp.Data.Staff.HospitalHN)
+	}
+
+	// Verify Cookie
+	cookieHeader := w.Header().Get("Set-Cookie")
+	if !strings.Contains(cookieHeader, "session_token=mock-jwt-session-token") {
+		t.Errorf("expected Set-Cookie to contain session token, got %q", cookieHeader)
+	}
+	if !strings.Contains(cookieHeader, "HttpOnly") {
+		t.Errorf("expected Set-Cookie to have HttpOnly flag, got %q", cookieHeader)
+	}
+}
+
+func TestStaffHandler_LoginStaff_MissingUsername(t *testing.T) {
+	mockSvc := &mockStaffService{}
+	handler := NewStaffHandlerWithService(mockSvc)
+	r := newTestStaffRouter(handler)
+
+	body := []byte(`{"password":"Password123!","hospital":"HOSP001"}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestStaffHandler_LoginStaff_MissingPassword(t *testing.T) {
+	mockSvc := &mockStaffService{}
+	handler := NewStaffHandlerWithService(mockSvc)
+	r := newTestStaffRouter(handler)
+
+	body := []byte(`{"username":"somchai","hospital":"HOSP001"}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestStaffHandler_LoginStaff_MissingHospital(t *testing.T) {
+	mockSvc := &mockStaffService{}
+	handler := NewStaffHandlerWithService(mockSvc)
+	r := newTestStaffRouter(handler)
+
+	body := []byte(`{"username":"somchai","password":"Password123!"}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400 when hospital is missing, got %d", w.Code)
+	}
+}
+
+func TestStaffHandler_LoginStaff_InvalidUsernameFormat(t *testing.T) {
+	mockSvc := &mockStaffService{}
+	handler := NewStaffHandlerWithService(mockSvc)
+	r := newTestStaffRouter(handler)
+
+	testCases := []struct {
+		name     string
+		username string
+	}{
+		{"contains_space", "staff user"},
+		{"contains_special_char", "staff@user!"},
+		{"contains_thai", "สมชาย"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := map[string]string{
+				"username": tc.username,
+				"password": "Password123!",
+				"hospital": "HOSP001",
+			}
+			body, _ := json.Marshal(payload)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected status 400 for username format violation, got %d", w.Code)
+			}
+		})
+	}
+}
+
+func TestStaffHandler_LoginStaff_InvalidPasswordFormat(t *testing.T) {
+	mockSvc := &mockStaffService{}
+	handler := NewStaffHandlerWithService(mockSvc)
+	r := newTestStaffRouter(handler)
+
+	testCases := []struct {
+		name     string
+		password string
+	}{
+		{"too_short", "Pass1!"},
+		{"missing_lowercase", "PASSWORD123!"},
+		{"missing_uppercase", "password123!"},
+		{"missing_digit", "Password!!!"},
+		{"missing_special", "Password123"},
+		{"contains_thai", "Password123!ไทย"},
+		{"contains_space", "Password 123!"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := map[string]string{
+				"username": "somchai",
+				"password": tc.password,
+				"hospital": "HOSP001",
+			}
+			body, _ := json.Marshal(payload)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected status 400 for password format violation, got %d", w.Code)
+			}
+		})
+	}
+}
+
+func TestStaffHandler_LoginStaff_InvalidCredentials(t *testing.T) {
+	mockSvc := &mockStaffService{loginErr: service.ErrInvalidCredentials}
+	handler := NewStaffHandlerWithService(mockSvc)
+	r := newTestStaffRouter(handler)
+
+	body := []byte(`{"username":"somchai","password":"WrongPassword123!","hospital":"HOSP001"}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	var prob middleware.ProblemDetails
+	if err := json.Unmarshal(w.Body.Bytes(), &prob); err != nil {
+		t.Fatalf("failed to parse problem details: %v", err)
+	}
+	if prob.Status != http.StatusUnauthorized {
+		t.Errorf("expected status 401, got %d", prob.Status)
+	}
+	if prob.Detail != "invalid username or password" {
+		t.Errorf("expected detail 'invalid username or password', got %q", prob.Detail)
+	}
+	if prob.Type != "/errors/unauthorized" {
+		t.Errorf("expected type '/errors/unauthorized', got %q", prob.Type)
+	}
+}
+
+func TestStaffHandler_LoginStaff_HospitalNotFound(t *testing.T) {
+	mockSvc := &mockStaffService{loginErr: service.ErrHospitalNotFound}
+	handler := NewStaffHandlerWithService(mockSvc)
+	r := newTestStaffRouter(handler)
+
+	body := []byte(`{"username":"somchai","password":"Password123!","hospital":"NON_EXISTENT"}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400 when hospital does not exist, got %d", w.Code)
+	}
+
+	var prob middleware.ProblemDetails
+	if err := json.Unmarshal(w.Body.Bytes(), &prob); err != nil {
+		t.Fatalf("failed to parse problem details: %v", err)
+	}
+	if prob.Status != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", prob.Status)
+	}
+	if prob.Detail != "hospital not found" {
+		t.Errorf("expected detail 'hospital not found', got %q", prob.Detail)
+	}
+	if prob.Type != "/errors/hospital-not-found" {
+		t.Errorf("expected type '/errors/hospital-not-found', got %q", prob.Type)
+	}
+}
+
+func TestStaffHandler_LoginStaff_InternalError(t *testing.T) {
+	mockSvc := &mockStaffService{loginErr: errors.New("db error")}
+	handler := NewStaffHandlerWithService(mockSvc)
+	r := newTestStaffRouter(handler)
+
+	body := []byte(`{"username":"somchai","password":"Password123!","hospital":"HOSP001"}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/staff/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d", w.Code)
 	}
 }
