@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,7 +18,28 @@ var (
 	ErrInvalidDateOfBirth = errors.New("invalid date_of_birth format: must be YYYY-MM-DD")
 	// ErrInvalidHospitalID is returned when staff hospital context is missing.
 	ErrInvalidHospitalID = errors.New("hospital ID is required")
+	// ErrPatientNotFound is returned when the patient does not exist or does not belong to the hospital.
+	ErrPatientNotFound = errors.New("patient not found")
+	// ErrInvalidPatientID is returned when the patient identifier (national_id or passport_id) format is invalid.
+	ErrInvalidPatientID = errors.New("invalid national_id or passport_id format")
 )
+
+var (
+	uuidRegex       = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	nationalIDRegex = regexp.MustCompile(`^[0-9]{13}$`)
+	passportIDRegex = regexp.MustCompile(`^[a-zA-Z0-9]{6,20}$`)
+)
+
+// IsValidUUID checks if the provided string is a valid UUID format.
+func IsValidUUID(u string) bool {
+	return uuidRegex.MatchString(strings.TrimSpace(u))
+}
+
+// IsValidIdentity checks if the provided string is a valid Thai National ID (13 digits) or Passport ID (6-20 alphanumeric characters).
+func IsValidIdentity(id string) bool {
+	id = strings.TrimSpace(id)
+	return nationalIDRegex.MatchString(id) || passportIDRegex.MatchString(id)
+}
 
 // PatientSearchInput holds the user-supplied query or payload for patient search.
 type PatientSearchInput struct {
@@ -107,6 +129,8 @@ type PatientSearchResult struct {
 // PatientService defines business operations for patients.
 type PatientService interface {
 	SearchPatients(ctx context.Context, hospitalID string, input PatientSearchInput) (*PatientSearchResult, error)
+	GetPatientByID(ctx context.Context, hospitalID string, id string) (*PatientResponse, error)
+	GetPatientByIdentity(ctx context.Context, hospitalID string, identity string) (*PatientResponse, error)
 }
 
 type patientService struct {
@@ -175,3 +199,51 @@ func (s *patientService) SearchPatients(ctx context.Context, hospitalID string, 
 		Total:    total,
 	}, nil
 }
+
+// GetPatientByIdentity retrieves a specific patient by National ID or Passport ID scoped to the staff's hospital.
+func (s *patientService) GetPatientByIdentity(ctx context.Context, hospitalID string, identity string) (*PatientResponse, error) {
+	hospitalID = strings.TrimSpace(hospitalID)
+	if hospitalID == "" {
+		return nil, ErrInvalidHospitalID
+	}
+
+	identity = strings.TrimSpace(identity)
+	if !IsValidIdentity(identity) {
+		return nil, ErrInvalidPatientID
+	}
+
+	if s.patientRepo == nil {
+		return nil, errors.New("patient repository is not configured")
+	}
+
+	r, err := s.patientRepo.FindByIdentity(ctx, hospitalID, identity)
+	if err != nil {
+		return nil, fmt.Errorf("find patient by identity: %w", err)
+	}
+	if r == nil {
+		return nil, ErrPatientNotFound
+	}
+
+	return &PatientResponse{
+		ID:           r.ID,
+		PatientHN:    r.PatientHN,
+		FirstNameTH:  r.FirstNameTH,
+		MiddleNameTH: r.MiddleNameTH,
+		LastNameTH:   r.LastNameTH,
+		FirstNameEN:  r.FirstNameEN,
+		MiddleNameEN: r.MiddleNameEN,
+		LastNameEN:   r.LastNameEN,
+		DateOfBirth:  r.DateOfBirth.Format("2006-01-02"),
+		NationalID:   r.NationalID,
+		PassportID:   r.PassportID,
+		PhoneNumber:  r.PhoneNumber,
+		Email:        r.Email,
+		Gender:       string(r.Gender),
+	}, nil
+}
+
+// GetPatientByID retrieves a specific patient by National ID or Passport ID (delegates to GetPatientByIdentity).
+func (s *patientService) GetPatientByID(ctx context.Context, hospitalID string, id string) (*PatientResponse, error) {
+	return s.GetPatientByIdentity(ctx, hospitalID, id)
+}
+

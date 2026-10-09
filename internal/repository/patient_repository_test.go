@@ -20,6 +20,16 @@ func TestPatientRepository_NilDB(t *testing.T) {
 		t.Fatal("expected error with nil db, got nil")
 	}
 
+	_, err = repo.FindByID(ctx, "hosp-id", "some-id")
+	if err == nil {
+		t.Fatal("expected error with nil db, got nil")
+	}
+
+	_, err = repo.FindByIdentity(ctx, "hosp-id", "some-identity")
+	if err == nil {
+		t.Fatal("expected error with nil db, got nil")
+	}
+
 	_, err = repo.Create(ctx, &models.Patient{})
 	if err == nil {
 		t.Fatal("expected error with nil db, got nil")
@@ -212,5 +222,80 @@ func TestPatientRepository_LiveDB(t *testing.T) {
 	}
 	if total != 1 || len(results) != 1 {
 		t.Errorf("expected total=1 and len=1, got total=%d len=%d", total, len(results))
+	}
+
+	// 9. FindByID: Existing patient in hosp1
+	foundPatient, err := patientRepo.FindByID(ctx, hosp1.ID, created1.ID)
+	if err != nil {
+		t.Fatalf("FindByID error: %v", err)
+	}
+	if foundPatient == nil {
+		t.Fatalf("expected patient %s to be found, got nil", created1.ID)
+	}
+	if foundPatient.ID != created1.ID {
+		t.Errorf("expected ID %s, got %s", created1.ID, foundPatient.ID)
+	}
+	if foundPatient.PatientHN != "P-TEST-001" {
+		t.Errorf("expected HN P-TEST-001, got %s", foundPatient.PatientHN)
+	}
+	if foundPatient.FirstNameTH != "เรโปสมชาย" || foundPatient.FirstNameEN != "RepoSomchai" {
+		t.Errorf("unexpected first names: %s, %s", foundPatient.FirstNameTH, foundPatient.FirstNameEN)
+	}
+	if foundPatient.HospitalHN != "HOSP001" {
+		t.Errorf("expected HospitalHN HOSP001, got %s", foundPatient.HospitalHN)
+	}
+
+	// 10. FindByID: Hospital isolation - patient1 queried under hosp2
+	isolatedPatient, err := patientRepo.FindByID(ctx, hosp2.ID, created1.ID)
+	if err != nil {
+		t.Fatalf("FindByID cross-hospital error: %v", err)
+	}
+	if isolatedPatient != nil {
+		t.Errorf("expected nil patient due to hospital isolation, got %+v", isolatedPatient)
+	}
+
+	// 11. FindByID: Non-existent UUID
+	nonExistentPatient, err := patientRepo.FindByID(ctx, hosp1.ID, "00000000-0000-0000-0000-000000000000")
+	if err != nil {
+		t.Fatalf("FindByID non-existent error: %v", err)
+	}
+	if nonExistentPatient != nil {
+		t.Errorf("expected nil for non-existent UUID, got %+v", nonExistentPatient)
+	}
+
+	// 12. FindByIdentity: by NationalID
+	pByNat, err := patientRepo.FindByIdentity(ctx, hosp1.ID, "1100509999001")
+	if err != nil {
+		t.Fatalf("FindByIdentity national_id error: %v", err)
+	}
+	if pByNat == nil || pByNat.ID != created1.ID {
+		t.Errorf("expected patient %s, got %+v", created1.ID, pByNat)
+	}
+
+	// 13. FindByIdentity: by PassportID (case-insensitive)
+	pByPass, err := patientRepo.FindByIdentity(ctx, hosp1.ID, "aa1234567")
+	if err != nil {
+		t.Fatalf("FindByIdentity passport_id error: %v", err)
+	}
+	if pByPass == nil || pByPass.ID != created1.ID {
+		t.Errorf("expected patient %s, got %+v", created1.ID, pByPass)
+	}
+
+	// 14. FindByIdentity: Multi-tenant hospital isolation
+	pCrossHosp, err := patientRepo.FindByIdentity(ctx, hosp2.ID, "1100509999001")
+	if err != nil {
+		t.Fatalf("FindByIdentity cross-hospital error: %v", err)
+	}
+	if pCrossHosp != nil {
+		t.Errorf("expected nil due to hospital isolation, got %+v", pCrossHosp)
+	}
+
+	// 15. FindByIdentity: Non-existent identity
+	pNonExist, err := patientRepo.FindByIdentity(ctx, hosp1.ID, "9999999999999")
+	if err != nil {
+		t.Fatalf("FindByIdentity non-existent error: %v", err)
+	}
+	if pNonExist != nil {
+		t.Errorf("expected nil for non-existent national_id, got %+v", pNonExist)
 	}
 }

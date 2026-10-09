@@ -141,3 +141,39 @@ func (h *PatientHandler) SearchPatients(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response.Success(result, "patients retrieved successfully"))
 }
+
+// GetPatientByID handles GET /patient/search/{id} requests.
+// @Summary      Search patient by National ID or Passport ID
+// @Description  Search and retrieve specific patient details by Thai National ID (13 digits) or Passport ID within the authenticated staff member's hospital.
+// @Tags         Patient
+// @Produce      json
+// @Security     CookieAuth
+// @Param        id             path     string true "National ID (13 digits) or Passport ID" example("1100501234567")
+// @Success      200            {object} response.Response[service.PatientResponse] "Successful response with patient details"
+// @Failure      400            {object} middleware.ProblemDetails "Bad request: invalid national_id or passport_id format"
+// @Failure      401            {object} middleware.ProblemDetails "Unauthorized: missing or invalid session cookie"
+// @Failure      404            {object} middleware.ProblemDetails "Not found: patient does not exist"
+// @Failure      500            {object} middleware.ProblemDetails "Internal server error"
+// @Router       /patient/search/{id} [get]
+func (h *PatientHandler) GetPatientByID(c *gin.Context) {
+	hospitalID, ok := middleware.GetHospitalID(c)
+	if !ok || strings.TrimSpace(hospitalID) == "" {
+		_ = c.Error(middleware.NewAppError(http.StatusUnauthorized, "staff hospital affiliation missing"))
+		return
+	}
+
+	id := strings.TrimSpace(c.Param("id"))
+	if !service.IsValidIdentity(id) {
+		_ = c.Error(service.ErrInvalidPatientID)
+		return
+	}
+
+	result, err := h.patientService.GetPatientByID(c.Request.Context(), hospitalID, id)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response.Success(result, "patient retrieved successfully"))
+}
+

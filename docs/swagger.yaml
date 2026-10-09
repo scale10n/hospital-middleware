@@ -21,6 +21,19 @@ definitions:
         description: URI reference that identifies the problem type
         type: string
     type: object
+  hospital-middleware_internal_response.Response-hospital-middleware_internal_service_PatientResponse:
+    properties:
+      data:
+        allOf:
+        - $ref: '#/definitions/hospital-middleware_internal_service.PatientResponse'
+        description: Payload data
+      message:
+        description: Human-readable status message
+        type: string
+      status:
+        description: '"success"'
+        type: string
+    type: object
   hospital-middleware_internal_response.Response-internal_handlers_CreateStaffOutput:
     properties:
       data:
@@ -314,6 +327,45 @@ paths:
       security:
       - CookieAuth: []
       summary: Search patients
+      tags:
+      - Patient
+  /patient/search/{id}:
+    get:
+      description: Search and retrieve specific patient details by Thai National ID
+        (13 digits) or Passport ID within the authenticated staff member's hospital.
+      parameters:
+      - description: National ID (13 digits) or Passport ID
+        example: '"1100501234567"'
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Successful response with patient details
+          schema:
+            $ref: '#/definitions/hospital-middleware_internal_response.Response-hospital-middleware_internal_service_PatientResponse'
+        "400":
+          description: 'Bad request: invalid national_id or passport_id format'
+          schema:
+            $ref: '#/definitions/hospital-middleware_internal_middleware.ProblemDetails'
+        "401":
+          description: 'Unauthorized: missing or invalid session cookie'
+          schema:
+            $ref: '#/definitions/hospital-middleware_internal_middleware.ProblemDetails'
+        "404":
+          description: 'Not found: patient does not exist'
+          schema:
+            $ref: '#/definitions/hospital-middleware_internal_middleware.ProblemDetails'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/hospital-middleware_internal_middleware.ProblemDetails'
+      security:
+      - CookieAuth: []
+      summary: Search patient by National ID or Passport ID
       tags:
       - Patient
   /staff/create:

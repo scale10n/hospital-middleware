@@ -123,8 +123,12 @@ func ErrorHandler() gin.HandlerFunc {
 			problem = NewProblemDetails(http.StatusUnauthorized, "invalid username or password", instance, "/errors/unauthorized")
 
 		case errors.Is(err, service.ErrEmptySearchCriteria),
-			errors.Is(err, service.ErrInvalidDateOfBirth):
+			errors.Is(err, service.ErrInvalidDateOfBirth),
+			errors.Is(err, service.ErrInvalidPatientID):
 			problem = NewProblemDetails(http.StatusBadRequest, err.Error(), instance, "/errors/validation-error")
+
+		case errors.Is(err, service.ErrPatientNotFound):
+			problem = NewProblemDetails(http.StatusNotFound, "patient not found", instance, "/errors/patient-not-found")
 
 		case errors.Is(err, service.ErrInvalidHospitalID):
 			problem = NewProblemDetails(http.StatusUnauthorized, "hospital ID is required", instance, "/errors/unauthorized")

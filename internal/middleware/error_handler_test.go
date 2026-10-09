@@ -206,3 +206,66 @@ func TestErrorHandler_RFC7807_InternalError(t *testing.T) {
 		t.Errorf("expected detail 'failed to query hospital', got %q", problem.Detail)
 	}
 }
+
+func TestErrorHandler_RFC7807_PatientNotFound(t *testing.T) {
+	r := gin.New()
+	r.Use(middleware.ErrorHandler())
+	r.GET("/patient-not-found", func(c *gin.Context) {
+		_ = c.Error(service.ErrPatientNotFound)
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/patient-not-found", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", w.Code)
+	}
+
+	var problem middleware.ProblemDetails
+	if err := json.Unmarshal(w.Body.Bytes(), &problem); err != nil {
+		t.Fatalf("failed to parse problem details: %v", err)
+	}
+
+	if problem.Status != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", problem.Status)
+	}
+	if problem.Detail != "patient not found" {
+		t.Errorf("expected detail 'patient not found', got %q", problem.Detail)
+	}
+	if problem.Type != "/errors/patient-not-found" {
+		t.Errorf("expected type '/errors/patient-not-found', got %q", problem.Type)
+	}
+}
+
+func TestErrorHandler_RFC7807_InvalidPatientID(t *testing.T) {
+	r := gin.New()
+	r.Use(middleware.ErrorHandler())
+	r.GET("/invalid-patient-id", func(c *gin.Context) {
+		_ = c.Error(service.ErrInvalidPatientID)
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/invalid-patient-id", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+
+	var problem middleware.ProblemDetails
+	if err := json.Unmarshal(w.Body.Bytes(), &problem); err != nil {
+		t.Fatalf("failed to parse problem details: %v", err)
+	}
+
+	if problem.Status != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", problem.Status)
+	}
+	if problem.Detail != service.ErrInvalidPatientID.Error() {
+		t.Errorf("expected detail %q, got %q", service.ErrInvalidPatientID.Error(), problem.Detail)
+	}
+	if problem.Type != "/errors/validation-error" {
+		t.Errorf("expected type '/errors/validation-error', got %q", problem.Type)
+	}
+}
+

@@ -27,6 +27,8 @@ type PatientSearchParams struct {
 // PatientRepository defines data persistence operations for patients.
 type PatientRepository interface {
 	Search(ctx context.Context, params PatientSearchParams) ([]*models.PatientWithHospital, int, error)
+	FindByID(ctx context.Context, hospitalID string, id string) (*models.PatientWithHospital, error)
+	FindByIdentity(ctx context.Context, hospitalID string, identity string) (*models.PatientWithHospital, error)
 	Create(ctx context.Context, p *models.Patient) (*models.Patient, error)
 	DeleteByID(ctx context.Context, id string) error
 }
@@ -258,6 +260,147 @@ func (r *patientRepository) Create(ctx context.Context, p *models.Patient) (*mod
 	return p, nil
 }
 
+// FindByID retrieves a patient by hospital ID and patient UUID.
+// Returns nil, nil if the patient does not exist or belongs to another hospital.
+func (r *patientRepository) FindByID(ctx context.Context, hospitalID string, id string) (*models.PatientWithHospital, error) {
+	if r.db == nil {
+		return nil, errors.New("database connection is nil")
+	}
+
+	query := `
+		SELECT 
+			p.id,
+			p.hospital_id,
+			p.patient_hn,
+			COALESCE(p.national_id, ''),
+			COALESCE(p.passport_id, ''),
+			COALESCE(p.first_name_th, ''),
+			COALESCE(p.middle_name_th, ''),
+			COALESCE(p.last_name_th, ''),
+			COALESCE(p.first_name_en, ''),
+			COALESCE(p.middle_name_en, ''),
+			COALESCE(p.last_name_en, ''),
+			p.date_of_birth,
+			COALESCE(p.phone_number, ''),
+			COALESCE(p.email, ''),
+			p.gender,
+			p.created_at,
+			p.updated_at,
+			h.hn AS hospital_hn,
+			h.name AS hospital_name
+		FROM patient p
+		JOIN hospital h ON p.hospital_id = h.id
+		WHERE p.hospital_id = $1 AND p.id = $2
+	`
+
+	var item models.PatientWithHospital
+	var dob time.Time
+	var genderStr string
+
+	err := r.db.QueryRowContext(ctx, query, hospitalID, id).Scan(
+		&item.ID,
+		&item.HospitalID,
+		&item.PatientHN,
+		&item.NationalID,
+		&item.PassportID,
+		&item.FirstNameTH,
+		&item.MiddleNameTH,
+		&item.LastNameTH,
+		&item.FirstNameEN,
+		&item.MiddleNameEN,
+		&item.LastNameEN,
+		&dob,
+		&item.PhoneNumber,
+		&item.Email,
+		&genderStr,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+		&item.HospitalHN,
+		&item.HospitalName,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("query patient by id: %w", err)
+	}
+
+	item.DateOfBirth = dob
+	item.Gender = models.Gender(genderStr)
+	return &item, nil
+}
+
+// FindByIdentity retrieves a patient by hospital ID and national_id OR passport_id.
+// Returns nil, nil if the patient does not exist or belongs to another hospital.
+func (r *patientRepository) FindByIdentity(ctx context.Context, hospitalID string, identity string) (*models.PatientWithHospital, error) {
+	if r.db == nil {
+		return nil, errors.New("database connection is nil")
+	}
+
+	query := `
+		SELECT 
+			p.id,
+			p.hospital_id,
+			p.patient_hn,
+			COALESCE(p.national_id, ''),
+			COALESCE(p.passport_id, ''),
+			COALESCE(p.first_name_th, ''),
+			COALESCE(p.middle_name_th, ''),
+			COALESCE(p.last_name_th, ''),
+			COALESCE(p.first_name_en, ''),
+			COALESCE(p.middle_name_en, ''),
+			COALESCE(p.last_name_en, ''),
+			p.date_of_birth,
+			COALESCE(p.phone_number, ''),
+			COALESCE(p.email, ''),
+			p.gender,
+			p.created_at,
+			p.updated_at,
+			h.hn AS hospital_hn,
+			h.name AS hospital_name
+		FROM patient p
+		JOIN hospital h ON p.hospital_id = h.id
+		WHERE p.hospital_id = $1 AND (p.national_id = $2 OR p.passport_id ILIKE $2)
+		LIMIT 1
+	`
+
+	var item models.PatientWithHospital
+	var dob time.Time
+	var genderStr string
+
+	err := r.db.QueryRowContext(ctx, query, hospitalID, identity).Scan(
+		&item.ID,
+		&item.HospitalID,
+		&item.PatientHN,
+		&item.NationalID,
+		&item.PassportID,
+		&item.FirstNameTH,
+		&item.MiddleNameTH,
+		&item.LastNameTH,
+		&item.FirstNameEN,
+		&item.MiddleNameEN,
+		&item.LastNameEN,
+		&dob,
+		&item.PhoneNumber,
+		&item.Email,
+		&genderStr,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+		&item.HospitalHN,
+		&item.HospitalName,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("query patient by identity: %w", err)
+	}
+
+	item.DateOfBirth = dob
+	item.Gender = models.Gender(genderStr)
+	return &item, nil
+}
+
 // DeleteByID removes a patient record by ID (useful for test teardown).
 func (r *patientRepository) DeleteByID(ctx context.Context, id string) error {
 	if r.db == nil {
@@ -266,3 +409,4 @@ func (r *patientRepository) DeleteByID(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM patient WHERE id = $1", id)
 	return err
 }
+

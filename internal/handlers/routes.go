@@ -61,5 +61,6 @@ func RegisterRoutes(router *gin.Engine, healthHandler *HealthHandler, optionalAr
 	patientGroup.Use(middleware.CookieAuth(tokenService))
 	{
 		patientGroup.POST("/search", patientHandler.SearchPatients)
+		patientGroup.GET("/search/:id", patientHandler.GetPatientByID)
 	}
 }

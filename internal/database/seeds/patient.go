@@ -797,6 +797,9 @@ func SeedPatients(ctx context.Context, db *sql.DB) error {
 		}
 		hospMap[hn] = id
 	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate hospital rows: %w", err)
+	}
 
 	insertQuery := `
 		INSERT INTO patient (

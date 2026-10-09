@@ -10,26 +10,30 @@ A Go-based API middleware service built with [Gin Web Framework](https://github.
 - [Architecture & Services](#architecture--services)
 - [Project Structure](#project-structure)
 - [Prerequisites](#prerequisites)
-- [Quick Start for Developers](#quick-start-for-developers)
-- [Getting Started](#getting-started)
+- [Quick Start with Docker Compose (3 Minutes)](#quick-start-with-docker-compose-3-minutes)
+- [Docker Compose Guide](#docker-compose-guide)
   - [1. Configure Environment](#1-configure-environment)
-  - [2. Generate SSL Certificates](#2-generate-ssl-certificates)
-  - [3. Run with Docker Compose](#3-run-with-docker-compose)
-  - [4. Run Locally (Go Development)](#4-run-locally-go-development)
+  - [2. Generate SSL/TLS Certificates](#2-generate-ssltls-certificates)
+  - [3. Start Services & Verify Health](#3-start-services--verify-health)
+  - [4. Seed Database Mockup Data](#4-seed-database-mockup-data)
+  - [5. Docker Compose Daily Cheatsheet](#5-docker-compose-daily-cheatsheet)
+  - [6. Connecting to PostgreSQL (GUI & CLI)](#6-connecting-to-postgresql-gui--cli)
+  - [7. Customizing Exposed Ports](#7-customizing-exposed-ports)
+- [Local Go Development (Without Docker API)](#local-go-development-without-docker-api)
 - [API Endpoints & Testing](#api-endpoints--testing)
   - [Endpoints](#endpoints)
   - [Interactive API Documentation (Swagger UI)](#interactive-api-documentation-swagger-ui)
   - [Request Validation Rules](#request-validation-rules)
-  - [Testing via curl](#testing-via-curl)
+  - [Testing via curl (End-to-End Walkthrough)](#testing-via-curl-end-to-end-walkthrough)
   - [Error Handling (RFC 7807 Problem Details)](#error-handling-rfc-7807-problem-details)
 - [Database Migrations](#database-migrations)
   - [1. Automatic Migrations on Startup](#1-automatic-migrations-on-startup)
   - [2. Migration Files Overview](#2-migration-files-overview)
   - [3. Manual CLI Migrations](#3-manual-cli-migrations)
-- [Database Seeder (Mock Data)](#database-seeder-mock-data)
-- [Testing (TDD)](#testing-tdd)
+- [Database Seeder Deep Dive](#database-seeder-deep-dive)
+- [Testing (TDD Suite)](#testing-tdd-suite)
 - [Environment Variables](#environment-variables)
-- [Troubleshooting](#troubleshooting)
+- [Troubleshooting & FAQ](#troubleshooting--faq)
 
 ---
 
@@ -170,122 +174,239 @@ hospital-middleware/
 
 ## Prerequisites
 
-- **Docker**: `20.10+` (or Docker Desktop)
-- **Docker Compose**: `v2+`
-- **Go**: `1.25.0` or higher *(only if developing/running outside Docker)*
-- **swag CLI**: *(optional/recommended, for generating Swagger documentation)*: `go install github.com/swaggo/swag/cmd/swag@latest`
-- **OpenSSL**: *(used to generate local SSL certificates; Docker fallback is automatic)*
-- **golang-migrate**: *(optional, for running CLI migrations manually)*
+- **For Docker Compose (Recommended)**:
+  - **Docker**: `20.10+` (or Docker Desktop)
+  - **Docker Compose**: `v2+`
+  - *(That's all! You do **not** need Go, PostgreSQL, or OpenSSL installed locally on your host machine to run, seed, or test the stack).*
+- **For Host Development (Go native outside Docker)**:
+  - **Go**: `1.25.0` or higher
+  - **OpenSSL**: *(used by `generate-cert.sh` on host; Docker fallback is automatic)*
+  - **swag CLI**: *(optional, for regenerating Swagger docs)*: `go install github.com/swaggo/swag/cmd/swag@latest`
+  - **golang-migrate**: *(optional, for running manual migrations via CLI)*
 
 ---
 
-## Quick Start for Developers
+## Quick Start with Docker Compose (3 Minutes)
 
-For a fresh checkout, run these steps to get the entire stack running:
+Get the entire stack (PostgreSQL + API + Nginx SSL + Seeded Mock Data) up and running in **one copy-paste command**:
 
 ```bash
-# 1. Enter repository
+# One-liner quick start:
+cp .env.example .env && \
+chmod +x ./nginx/ssl/generate-cert.sh && ./nginx/ssl/generate-cert.sh && \
+docker compose up -d --build && \
+docker run --rm --network bridge-network -v "$PWD":/app -w /app --env-file .env -e DB_HOST=postgres golang:1.25-alpine go run ./cmd/seed
+```
+
+Or follow the step-by-step instructions below:
+
+### Step 1: Clone Repository & Configure Environment
+```bash
+git clone https://github.com/scale10n/hospital-middleware.git
 cd hospital-middleware
-
-# 2. Copy environment file
-cp .env.example .env
-
-# 3. Generate local SSL certificates (runs via host openssl or Docker automatically)
-chmod +x ./nginx/ssl/generate-cert.sh
-./nginx/ssl/generate-cert.sh
-
-# 4. Start all services
-docker compose up -d --build
-
-# 5. Verify health via HTTPS
-curl -k https://localhost/health
-# Expected: {"database":"connected","status":"healthy"}
-```
-
-> **Note for Windows users:**
-> - Run `./nginx/ssl/generate-cert.sh` inside **Git Bash** or **WSL**.
-
----
-
-## Getting Started
-
-### 1. Configure Environment
-
-Copy the example environment file:
-```bash
 cp .env.example .env
 ```
+> The default variables in `.env.example` work out of the box for local Docker Compose development.
 
-Review `.env` settings if needed (default values work out of the box for local development).
-
-### 2. Generate SSL Certificates
-
-Because private keys (`*.key`) and certificates (`*.crt`) are excluded from Git for security, generate them once locally:
-
+### Step 2: Generate Local SSL/TLS Certificates
+Nginx mounts `./nginx/ssl` to terminate HTTPS. Because private keys and certificates are excluded from Git (`.gitignore`), generate them once:
 ```bash
 chmod +x ./nginx/ssl/generate-cert.sh
 ./nginx/ssl/generate-cert.sh
 ```
+> **Tip:** If `openssl` is not installed on your host system, the script automatically uses Docker (`alpine`) to generate SAN-enabled certificates. Windows users can run this in **Git Bash** or **WSL**.
 
-Optional arguments:
-```bash
-# Custom domain and validity period (days)
-./nginx/ssl/generate-cert.sh localhost 365
-```
-
-This generates `server.crt` and `server.key` inside `nginx/ssl/` with Subject Alternative Names (SAN) supporting `localhost`, `127.0.0.1`, and `::1`. *(If OpenSSL is not installed on the host, the script automatically falls back to Docker and ensures file permissions are set correctly to `600` for the key and `644` for the certificate).*
-
-### 3. Run with Docker Compose
-
-#### Start services:
+### Step 3: Start Services with Docker Compose
 ```bash
 docker compose up -d --build
 ```
+This builds and launches the containers in sequence with automated health checks:
+1. `postgres` (PostgreSQL 18.4) starts on port `5432`.
+2. `hospital-middleware-api` waits for PostgreSQL, auto-applies database migrations (`DB_AUTO_MIGRATE=true`), and starts on port `8080`.
+3. `nginx` waits for the API health probe, binds ports `80` and `443`, and terminates SSL.
 
-#### Check container health status:
+Check container status:
 ```bash
 docker compose ps
 ```
-*(All services `postgres`, `hospital-middleware-api`, and `nginx` should show status **Up (healthy)**).*
+*(All 3 services will show status `Up (healthy)` after ~10-15 seconds).*
 
-#### View logs:
+### Step 4: Seed Database with Mockup Data (Crucial Step!)
+When started for the first time, the database tables are migrated but empty. Running the seeder inserts **10 hospitals** (`HOSP001` - `HOSP010`) and **45 patients** required for staff authentication and patient search:
+
 ```bash
-# All services
-docker compose logs -f
-
-# Specific service
-docker compose logs -f hospital-middleware-api
-docker compose logs -f nginx
-docker compose logs -f postgres
+# Run seeder via Docker (No local Go installation required!)
+docker run --rm --network bridge-network -v "$PWD":/app -w /app \
+  --env-file .env -e DB_HOST=postgres \
+  golang:1.25-alpine go run ./cmd/seed
 ```
+*(Or if you have Go installed on your host machine: `go run ./cmd/seed`)*
 
-#### Stop services:
-```bash
-docker compose down
-```
+### Step 5: Verify Health & Explore Swagger UI
+- **Health Check**:
+  ```bash
+  curl -k https://localhost/health
+  # Expected: {"database":"connected","status":"healthy"}
+  ```
+- **Interactive Swagger UI**: Open in your browser:
+  - **Via HTTPS (Nginx Gateway)**: [https://localhost/swagger/index.html](https://localhost/swagger/index.html)
+  - **Via HTTP (Direct API Debug)**: [http://localhost:8080/swagger/index.html](http://localhost:8080/swagger/index.html)
 
 ---
 
-### 4. Run Locally (Go Development)
+## Docker Compose Guide
 
-If developing Go code locally without running the API container:
+### 1. Configure Environment
+
+The project uses `.env` for container orchestration. Key settings:
+
+| Variable | Default | Purpose in Docker Compose |
+| :--- | :--- | :--- |
+| `DB_USER` | `admin` | PostgreSQL superuser username |
+| `DB_PASSWORD` | `your_secure_password` | PostgreSQL superuser password (matches in db & api) |
+| `DB_NAME` | `hospital_middleware_db` | Application database name |
+| `PORT` | `8080` | Internal API port |
+| `NGINX_PORT` | `80` | Host port for HTTP (redirects 308 to HTTPS) |
+| `NGINX_SSL_PORT` | `443` | Host port for HTTPS gateway |
+| `JWT_SECRET` | *(32+ chars)* | HMAC-SHA256 secret for staff session tokens |
+| `DB_AUTO_MIGRATE`| `true` | Automatically runs embedded migrations on API startup |
+
+### 2. Generate SSL/TLS Certificates
+
+The script `./nginx/ssl/generate-cert.sh` creates a 2048-bit RSA certificate valid for 365 days with Subject Alternative Names (SAN) supporting:
+- `localhost`
+- IPv4 loopback: `127.0.0.1`
+- IPv6 loopback: `::1`
+
+```bash
+# Default (localhost, 365 days):
+./nginx/ssl/generate-cert.sh
+
+# Custom domain and duration:
+./nginx/ssl/generate-cert.sh api.local 730
+```
+
+### 3. Start Services & Verify Health
+
+```bash
+# Start all containers in detached mode:
+docker compose up -d --build
+
+# Verify container health status:
+docker compose ps
+```
+
+Example healthy output:
+```text
+NAME                      IMAGE                                         COMMAND                  SERVICE                   CREATED          STATUS                    PORTS
+hospital-middleware-api   hospital-middleware-hospital-middleware-api   "/app/api"               hospital-middleware-api   10 seconds ago   Up 9 seconds (healthy)    0.0.0.0:8080->8080/tcp
+nginx                     nginx:alpine                                  "/docker-entrypoint.…"   nginx                     10 seconds ago   Up 8 seconds (healthy)    0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp
+postgres                  postgres:18.4                                 "docker-entrypoint.s…"   postgres                  10 seconds ago   Up 10 seconds (healthy)   0.0.0.0:5432->5432/tcp
+```
+
+### 4. Seed Database Mockup Data
+
+Without seed data, calling `POST /staff/create` with `hospital: "HOSP001"` will fail with `400 Bad Request` (`hospital not found`).
+
+Run the seeder with one of two options:
+
+- **Option A (Via Docker - No Go needed on host)**:
+  ```bash
+  docker run --rm --network bridge-network -v "$PWD":/app -w /app \
+    --env-file .env -e DB_HOST=postgres \
+    golang:1.25-alpine go run ./cmd/seed
+  ```
+- **Option B (Via Host Go)**:
+  ```bash
+  go run ./cmd/seed
+  ```
+
+Seeder features:
+- **Idempotent**: Can be re-run safely at any time (`ON CONFLICT (hn) DO UPDATE`).
+- **Atomic**: Runs inside a single database transaction.
+- **Selective Seeding**: Pass `-table=hospital` or `-table=patient` to seed specific datasets.
+
+### 5. Docker Compose Daily Cheatsheet
+
+| Action | Command |
+| :--- | :--- |
+| **Start / Build stack** | `docker compose up -d --build` |
+| **Stop stack (preserve data)** | `docker compose down` |
+| **Stop & Delete database volume** | `docker compose down -v` |
+| **View logs (all services)** | `docker compose logs -f` |
+| **View API logs only** | `docker compose logs -f hospital-middleware-api` |
+| **View Nginx logs only** | `docker compose logs -f nginx` |
+| **View Postgres logs only** | `docker compose logs -f postgres` |
+| **Rebuild API after code change** | `docker compose up -d --build hospital-middleware-api` |
+| **Restart single service** | `docker compose restart <service-name>` |
+| **Enter Postgres psql CLI** | `docker compose exec -it postgres psql -U admin -d hospital_middleware_db` |
+| **Enter API container shell** | `docker compose exec -it hospital-middleware-api /bin/sh` |
+| **Reload Nginx configuration** | `docker compose exec nginx nginx -s reload` |
+
+### 6. Connecting to PostgreSQL (GUI & CLI)
+
+The PostgreSQL container exposes port `5432` on `localhost`. You can connect using your favorite database GUI client (DBeaver, TablePlus, DataGrip, pgAdmin) or CLI:
+
+- **Host**: `localhost` (or `127.0.0.1`)
+- **Port**: `5432` *(or the value of `DB_PORT` in `.env`)*
+- **Database**: `hospital_middleware_db`
+- **Username**: `admin` *(or value of `DB_USER` in `.env`)*
+- **Password**: `your_secure_password` *(matches `DB_PASSWORD` in `.env`)*
+- **SSL Mode**: `disable`
+
+Or open an interactive SQL prompt directly:
+```bash
+docker compose exec -it postgres psql -U admin -d hospital_middleware_db
+```
+
+### 7. Customizing Exposed Ports
+
+If ports `80`, `443`, `8080`, or `5432` are already used by other services on your machine, customize them in `.env`:
+
+```env
+# Avoid port 80/443 conflict on host:
+NGINX_PORT=8088
+NGINX_SSL_PORT=8443
+
+# Avoid port 8080/5432 conflict:
+PORT=8888
+DB_PORT=5433
+```
+Then restart with `docker compose up -d`. You can then access HTTPS via `https://localhost:8443`.
+
+---
+
+## Local Go Development (Without Docker API)
+
+If you prefer to edit and run the Go code natively with live reload on your host machine while keeping PostgreSQL inside Docker:
 
 1. **Start only PostgreSQL**:
    ```bash
    docker compose up -d postgres
    ```
 
-2. **Download dependencies**:
+2. **Ensure Go is available in your PATH**:
+   ```bash
+   export PATH=$PATH:/usr/local/go/bin:~/go/bin
+   go version
+   ```
+
+3. **Install dependencies**:
    ```bash
    go mod download
    ```
 
-3. **Run the API server**:
+4. **Seed database mock data**:
+   ```bash
+   go run ./cmd/seed
+   ```
+
+5. **Run the API server**:
    ```bash
    go run ./cmd/api
    ```
 
-4. **Verify direct connection**:
+6. **Verify direct connection**:
    ```bash
    curl http://localhost:8080/health
    ```
@@ -303,6 +424,7 @@ If developing Go code locally without running the API container:
 | `POST` | `/staff/create` | Validate hospital HN, create staff member, hash password, persist session & issue JWT | `201 Created` | `application/json` |
 | `POST` | `/staff/login` | Authenticate staff credentials, persist session & issue JWT | `200 OK` | `application/json` |
 | `POST` | `/patient/search` | Search patients within staff's hospital matching all provided criteria (CookieAuth) | `200 OK` | `application/json` |
+| `GET` | `/patient/search/{id}` | Retrieve specific patient details by Thai National ID (13 digits) or Passport ID within staff's hospital (CookieAuth) | `200 OK` | `application/json` |
 
 ---
 
@@ -410,9 +532,19 @@ Accepts optional query parameters and/or JSON body:
 - **AND Logic**: Returns patients matching ALL provided filter criteria.
 - **Response Format**: JSend success envelope with patient details and total count (`total`).
 
+#### `GET /patient/search/{id}` Path Parameters
+Retrieves a single patient record by identity number within the authenticated staff's hospital:
+- **`id`** *(required, path parameter)*: Thai National ID (strictly 13 digits, e.g. `1100501234567`) OR Foreign Passport ID (6 to 20 alphanumeric characters, case-insensitive, e.g. `US556677889`). Patient UUIDs are not accepted.
+
+**Rules & Constraints:**
+- **Authentication**: Requires valid JWT session cookie `session_token` (`CookieAuth`). Rejects unauthorized requests with `401 Unauthorized`.
+- **Hospital Isolation**: Results are strictly filtered to the authenticated staff member's hospital (`WHERE p.hospital_id = staff.hospital_id AND (p.national_id = $2 OR p.passport_id ILIKE $2)`). Patients from other hospitals return `404 Not Found`.
+- **Validation**: Rejects invalid identifier formats (must be 13 numeric digits or 6-20 alphanumeric characters) with `400 Bad Request`.
+- **Response Format**: JSend success envelope containing all 14 patient fields (`id`, `patient_hn`, `first_name_th`, `middle_name_th`, `last_name_th`, `first_name_en`, `middle_name_en`, `last_name_en`, `date_of_birth`, `national_id`, `passport_id`, `phone_number`, `email`, `gender`).
+
 ---
 
-### Testing via curl
+### Testing via curl (End-to-End Walkthrough)
 
 #### 1. Via HTTPS (Port 443 - Recommended)
 > *Note: Use `-k` (or `--insecure`) because the SSL certificate is self-signed.*
@@ -443,7 +575,7 @@ curl -k -i -X POST https://localhost/staff/create \
       "id": "76ec965b-bf50-48b4-82a4-7935f8c6ebf7",
       "username": "somchai",
       "hospital_hn": "HOSP001",
-      "hospital_name": "Bangkok General Hospital",
+      "hospital_name": "โรงพยาบาลศิริราช (Siriraj Hospital)",
       "created_at": "2026-10-08T17:34:38.123456Z"
     },
     "session": {
@@ -476,7 +608,7 @@ curl -k -i -X POST https://localhost/staff/login \
       "id": "76ec965b-bf50-48b4-82a4-7935f8c6ebf7",
       "username": "somchai",
       "hospital_hn": "HOSP001",
-      "hospital_name": "Bangkok General Hospital",
+      "hospital_name": "โรงพยาบาลศิริราช (Siriraj Hospital)",
       "created_at": "2026-10-08T17:34:38.123456Z"
     },
     "session": {
@@ -521,6 +653,41 @@ curl -k -i -X POST "https://localhost/patient/search?first_name=Somchai" \
 }
 ```
 
+```bash
+# Patient Search by Identity (Thai National ID or Passport ID, requires session_token cookie from login)
+# Example 1: Search by 13-digit Thai National ID
+curl -k -i -X GET "https://localhost/patient/search/1100501234567" \
+  --cookie "session_token=<jwt_token>"
+
+# Example 2: Search by Foreign Passport ID
+curl -k -i -X GET "https://localhost/patient/search/US556677889" \
+  --cookie "session_token=<jwt_token>"
+```
+
+**HTTP 200 OK Response:**
+```json
+{
+  "status": "success",
+  "message": "patient retrieved successfully",
+  "data": {
+    "id": "c1f728ea-a312-4f35-905e-8b1d9bf5b012",
+    "patient_hn": "P00001",
+    "first_name_th": "สมชาย",
+    "middle_name_th": "วิชัย",
+    "last_name_th": "ใจดี",
+    "first_name_en": "Somchai",
+    "middle_name_en": "Wichai",
+    "last_name_en": "Jaidee",
+    "date_of_birth": "1985-04-12",
+    "national_id": "1100501234567",
+    "passport_id": "",
+    "phone_number": "0812345678",
+    "email": "somchai.jaidee@example.com",
+    "gender": "M"
+  }
+}
+```
+
 #### 2. Via HTTP Auto-Redirect (Port 80 -> 443 via 308)
 Nginx issues an **HTTP 308 Permanent Redirect**, which guarantees that clients preserve the HTTP method (`POST`) and request body when redirecting to HTTPS:
 ```bash
@@ -531,7 +698,7 @@ curl -i http://localhost/health
 curl -k -L -i -X POST http://localhost/staff/create \
   -H "Content-Type: application/json" \
   -d '{
-    "username": "nurse_ann",
+    "username": "nurseann",
     "password": "Password123!",
     "hospital": "HOSP001"
   }'
@@ -662,46 +829,67 @@ migrate -path migrations -database "postgres://admin:postgres@localhost:5432/hos
 
 ---
 
-## Database Seeder (Mock Data)
+## Database Seeder Deep Dive
 
-A dedicated Go Seeder CLI is provided under [`cmd/seed/`](cmd/seed/) to inject realistic mockup data into the database for local development and testing, keeping the `migrations/` directory clean and free of test-data pollution.
+A dedicated Go Seeder CLI is provided under [`cmd/seed/`](cmd/seed/) to inject realistic mockup data into PostgreSQL for local development and testing, keeping the `migrations/` directory clean and free of test-data pollution.
 
 ### Features
 - **Production Safeguard:** Automatically prevents execution if `GIN_MODE=release` or `APP_ENV=production`, unless overridden with the `-force` flag.
 - **Idempotency:** Utilizes `ON CONFLICT (hn) DO UPDATE` so seeders can be re-run safely without primary or unique key violations.
 - **Single Transaction:** All inserts for each table run atomically inside a database transaction (`BeginTx`).
 
-### Usage
+### Pre-Seeded Datasets for Testing
 
-Ensure the PostgreSQL database container or instance is running (`docker compose up -d postgres`), then run:
+#### 1. Hospitals (10 Master Records)
+| HN Code | Hospital Name (Thai & English) |
+| :--- | :--- |
+| `HOSP001` | โรงพยาบาลศิริราช (Siriraj Hospital) |
+| `HOSP002` | โรงพยาบาลจุฬาลงกรณ์ สภากาชาดไทย (King Chulalongkorn Memorial Hospital) |
+| `HOSP003` | โรงพยาบาลรามาธิบดี (Ramathibodi Hospital) |
+| `HOSP004` | โรงพยาบาลกรุงเทพ (Bangkok Hospital) |
+| `HOSP005` | โรงพยาบาลบำรุงราษฎร์ (Bumrungrad International Hospital) |
+| `HOSP006` - `HOSP010` | Samitivej, Phramongkutklao, Rajavithi, Thammasat, Maharaj Nakorn Chiang Mai |
 
-#### 1. Seed All Tables (Default):
+#### 2. Patients (45 Mock Records)
+- **Thai Citizen Example**: National ID `1100501234567` (Somchai Jaidee, Hospital `HOSP001`)
+- **Foreign Passport Example**: Passport ID `US556677889` (John Doe, Hospital `HOSP001`)
+
+### Execution Commands
+
+#### Option A: Running via Docker (No Go installed on host)
 ```bash
+# Seed all tables (Hospitals + Patients):
+docker run --rm --network bridge-network -v "$PWD":/app -w /app \
+  --env-file .env -e DB_HOST=postgres \
+  golang:1.25-alpine go run ./cmd/seed
+
+# Seed only hospitals:
+docker run --rm --network bridge-network -v "$PWD":/app -w /app \
+  --env-file .env -e DB_HOST=postgres \
+  golang:1.25-alpine go run ./cmd/seed -table=hospital
+
+# Seed only patients:
+docker run --rm --network bridge-network -v "$PWD":/app -w /app \
+  --env-file .env -e DB_HOST=postgres \
+  golang:1.25-alpine go run ./cmd/seed -table=patient
+```
+
+#### Option B: Running via Host Go CLI
+```bash
+# Seed all tables:
 go run ./cmd/seed
-```
 
-#### 2. Seed Specific Table:
-```bash
-# Seed only the hospital table
+# Seed specific table:
 go run ./cmd/seed -table=hospital
-
-# Seed only the patient table (for /patient/search API testing)
 go run ./cmd/seed -table=patient
-```
 
-#### 3. Seed in Production (Bypass Safeguard):
-```bash
-go run ./cmd/seed -table=hospital -force
-```
-
-#### 4. View Available CLI Flags:
-```bash
-go run ./cmd/seed -help
+# Bypass production safeguard (if needed):
+go run ./cmd/seed -force
 ```
 
 ---
 
-## Testing (TDD)
+## Testing (TDD Suite)
 
 Run the full Go test suite (unit tests and database integration tests):
 
@@ -739,35 +927,81 @@ go test -v ./...
 
 ---
 
-## Troubleshooting
+## Troubleshooting & FAQ
 
 ### 1. Nginx fails to start: missing `server.crt` or `server.key`
-SSL certificate files are git-ignored for security. Generate them by running:
+**Symptoms:** Nginx container exits with status code 1; log says: `cannot load certificate "/etc/nginx/ssl/server.crt": BIO_new_file() failed`.  
+**Solution:** SSL certificate files are git-ignored for security. Generate them once by running:
 ```bash
+chmod +x ./nginx/ssl/generate-cert.sh
 ./nginx/ssl/generate-cert.sh
 docker compose up -d --force-recreate nginx
 ```
 
-### 2. Startup fatal error: `jwt secret must be at least 32 characters long`
-For cryptographic security, `JWT_SECRET` is validated on startup and requires at least 32 characters. Ensure your `.env` contains a sufficiently long secret key:
+### 2. Port conflict: `Bind for 0.0.0.0:80 failed: port is already allocated`
+**Symptoms:** Docker Compose fails to start `nginx` or `postgres` because ports `80`, `443`, `8080`, or `5432` are in use by local services (Apache, Nginx, local PostgreSQL).  
+**Solution:** Change the exposed host ports in your `.env` file without changing internal container wiring:
+```env
+NGINX_PORT=8088
+NGINX_SSL_PORT=8443
+PORT=8081
+DB_PORT=5433
+```
+Then restart: `docker compose up -d`.
+
+### 3. Database password mismatch: `failed SASL auth: FATAL: password authentication failed`
+**Symptoms:** The Go API cannot connect to PostgreSQL on startup or during seeding.  
+**Cause:** Docker named volume `postgres_data` preserves the database credentials set when PostgreSQL was first initialized. If you changed `DB_PASSWORD` in `.env` after the container was already created, the database still uses the old password.  
+**Solution:** Reset the volume and recreate the database with your new `.env` settings:
+```bash
+# WARNING: This deletes existing local database data
+docker compose down -v
+docker compose up -d --build
+# Re-run seeder:
+docker run --rm --network bridge-network -v "$PWD":/app -w /app --env-file .env -e DB_HOST=postgres golang:1.25-alpine go run ./cmd/seed
+```
+
+### 4. `POST /staff/create` returns `400 Bad Request: hospital not found`
+**Symptoms:** Registering a new staff member fails with `{"detail": "hospital not found"}`.  
+**Cause:** Database migrations create the tables, but the `hospital` table has no records until the seeder is executed.  
+**Solution:** Run the seeder to populate default hospital codes (`HOSP001` - `HOSP010`):
+```bash
+docker run --rm --network bridge-network -v "$PWD":/app -w /app --env-file .env -e DB_HOST=postgres golang:1.25-alpine go run ./cmd/seed
+```
+
+### 5. `POST /staff/create` returns validation error on `Username`
+**Symptoms:** `Key: 'CreateStaffRequest.Username' Error:Field validation for 'Username' failed on the 'alphanum' tag`.  
+**Solution:** Usernames must be strictly alphanumeric English characters (`[a-zA-Z0-9]`). Underscores (`_`), dashes (`-`), spaces, and Thai characters are rejected. Use `somchai` or `nurseann` instead of `nurse_ann`.
+
+### 6. `POST /staff/create` returns validation error on `Password`
+**Symptoms:** `Field validation for 'Password' failed on the 'password' tag`.  
+**Solution:** Check that the password satisfies all security criteria:
+- Length: 8 to 32 characters
+- English characters and numbers only (no Thai characters or spaces)
+- At least 1 lowercase letter (`a-z`)
+- At least 1 uppercase letter (`A-Z`)
+- At least 1 digit (`0-9`)
+- At least 1 special character (`!@#$%^&*()-_=+[]{}|;:'",.<>/?`~\\`)
+
+### 7. Startup fatal error: `jwt secret must be at least 32 characters long`
+**Symptoms:** API container crashes on startup with `[FATAL] Invalid configuration: jwt secret must be at least 32 characters long`.  
+**Solution:** For cryptographic security, `JWT_SECRET` must contain 32 or more characters. Ensure your `.env` has:
 ```env
 JWT_SECRET=your_jwt_secret_key_at_least_32_characters_long
 ```
 
-### 3. SSL certificate warning in browser or curl (`certificate verify failed`)
-Because the certificate is self-signed for local development:
-- **curl**: Pass the `-k` (or `--insecure`) flag.
-- **Chrome / Firefox**: Click "Advanced" -> "Proceed to localhost (unsafe)".
+### 8. SSL certificate warning in browser or curl (`certificate verify failed`)
+**Symptoms:** Browser warns "Your connection is not private", or `curl` fails with SSL handshake error.  
+**Solution:** Because the certificate is self-signed for local development:
+- **curl**: Pass the `-k` (or `--insecure`) flag: `curl -k https://localhost/health`
+- **Chrome / Edge**: Click "Advanced" -> "Proceed to localhost (unsafe)".
+- **Firefox**: Click "Advanced" -> "Accept the Risk and Continue".
 
-### 4. POST /staff/create returns validation error on password
-Check that the password satisfies all criteria:
-- Minimum 8 characters, maximum 32 characters
-- English characters and numbers only (no Thai characters or spaces)
-- At least 1 lowercase letter, 1 uppercase letter, 1 digit, and 1 special character (`!@#$%^&*...`)
-
-### 5. Dependency version conflicts (`requires go >= 1.26`)
-Avoid running `go get -u` across all packages, as it upgrades transitive dependencies to unreleased Go versions. Instead, install specific packages:
+### 9. Windows script error: `\r: command not found` in `generate-cert.sh`
+**Symptoms:** Running `./nginx/ssl/generate-cert.sh` on Windows fails with carriage return syntax errors.  
+**Solution:** Convert CRLF to LF line endings using Git Bash or dos2unix:
 ```bash
-go get <package-name>
-go mod tidy
+dos2unix ./nginx/ssl/generate-cert.sh
+# Or run with sh directly:
+sh ./nginx/ssl/generate-cert.sh
 ```
